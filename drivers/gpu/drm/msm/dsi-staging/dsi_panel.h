@@ -250,6 +250,13 @@ struct dsi_panel {
 	int power_mode;
 	enum dsi_panel_physical_type panel_type;
 
+	bool doze_enabled;
+	enum dsi_doze_mode_type doze_mode;
+
+	int hbm_mode;
+
+	struct brightness_alpha_pair *fod_dim_lut;
+	u32 fod_dim_lut_count;
 	u32 panel_on_dimming_delay;
 	struct delayed_work cmds_work;
 	struct delayed_work nolp_bl_delay_work;
@@ -450,7 +457,12 @@ int dsi_panel_set_thermal_hbm_disabled(struct dsi_panel *panel,
 int dsi_panel_get_thermal_hbm_disabled(struct dsi_panel *panel,
 				bool *thermal_hbm_disabled);
 
+<<<<<<< HEAD
 void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
 		struct dsi_display_mode *mode, u32 frame_threshold_us);
 		
+=======
+int dsi_panel_apply_hbm_mode(struct dsi_panel *panel);
+
+>>>>>>> c266dd07ea71 (drm: msm: dsi-staging: Add support for high brightness mode (HBM))
 #endif /* _DSI_PANEL_H_ */
