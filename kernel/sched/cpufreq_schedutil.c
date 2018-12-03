@@ -291,12 +291,8 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
 
-<<<<<<< HEAD
-	freq = (freq + (freq >> 2)) * util / max;
-	trace_sugov_next_freq(policy->cpu, util, max, freq);
-=======
 	freq = map_util_freq(util, freq, max);
->>>>>>> 938e5e4b0d150 (sched/cpufreq: Prepare schedutil for Energy Aware Scheduling)
+	trace_sugov_next_freq(policy->cpu, util, max, freq);
 
 	if (freq == sg_policy->cached_raw_freq && sg_policy->next_freq != UINT_MAX)
 		return sg_policy->next_freq;
@@ -304,17 +300,6 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	return cpufreq_driver_resolve_freq(policy, freq);
 }
 
-<<<<<<< HEAD
-static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
-{
-	struct rq *rq = cpu_rq(cpu);
-	struct sugov_cpu *loadcpu = &per_cpu(sugov_cpu, cpu);
-	unsigned long util_cfs = cpu_util_cfs(cpu);
-	unsigned long util_dl  = cpu_util_dl(rq);
-	unsigned long util_ext;
-
-	*max = arch_scale_cpu_capacity(NULL, cpu);
-=======
 /*
  * This function computes an effective utilization for the given CPU, to be
  * used for frequency selection given the linear relation: f = u * f_max.
@@ -343,20 +328,6 @@ unsigned long schedutil_freq_util(int cpu, unsigned long util_cfs,
 
 	if (type == FREQUENCY_UTIL && rt_rq_is_runnable(&rq->rt))
 		return max;
->>>>>>> 938e5e4b0d150 (sched/cpufreq: Prepare schedutil for Energy Aware Scheduling)
-
-	/*
-	 * Ideally we would like to set util_dl as min/guaranteed freq and
-	 * util_cfs + util_dl as requested freq. However, cpufreq is not yet
-	 * ready for such an interface. So, we only do the latter for now.
-	 */
-	util_ext = min(util_cfs + util_dl, *max);
-
-<<<<<<< HEAD
-	*util = min(util_ext, cpu_util_freq_walt(cpu, &loadcpu->walt_load));
-	
-	*util = uclamp_rq_util_with(rq, *util, NULL);
-=======
 	/*
 	 * Because the time spend on RT/DL tasks is visible as 'lost' time to
 	 * CFS tasks and we use the same metric to track the effective
@@ -415,17 +386,26 @@ unsigned long schedutil_freq_util(int cpu, unsigned long util_cfs,
 	return min(max, util);
 }
 
-static unsigned long sugov_get_util(struct sugov_cpu *sg_cpu)
+static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 {
-	struct rq *rq = cpu_rq(sg_cpu->cpu);
-	unsigned long util = cpu_util_cfs(rq);
-	unsigned long max = arch_scale_cpu_capacity(NULL, sg_cpu->cpu);
+	struct rq *rq = cpu_rq(cpu);
+	struct sugov_cpu *loadcpu = &per_cpu(sugov_cpu, cpu);
+	unsigned long util_cfs = cpu_util_cfs(cpu);
+	unsigned long util_dl  = cpu_util_dl(rq);
+	unsigned long util_ext;
 
-	sg_cpu->max = max;
-	sg_cpu->bw_dl = cpu_bw_dl(rq);
+	*max = arch_scale_cpu_capacity(NULL, cpu);
 
-	return schedutil_freq_util(sg_cpu->cpu, util, max, FREQUENCY_UTIL);
->>>>>>> 938e5e4b0d150 (sched/cpufreq: Prepare schedutil for Energy Aware Scheduling)
+	/*
+	 * Ideally we would like to set util_dl as min/guaranteed freq and
+	 * util_cfs + util_dl as requested freq. However, cpufreq is not yet
+	 * ready for such an interface. So, we only do the latter for now.
+	 */
+	util_ext = min(util_cfs + util_dl, *max);
+
+	*util = min(util_ext, cpu_util_freq_walt(cpu, &loadcpu->walt_load));
+	
+	*util = schedutil_freq_util(sg_cpu->cpu, *util, max, FREQUENCY_UTIL);
 }
 
 static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
@@ -974,7 +954,7 @@ static struct kobj_type sugov_tunables_ktype = {
 
 /********************** cpufreq governor interface *********************/
 
-static struct cpufreq_governor schedutil_gov;
+struct cpufreq_governor schedutil_gov;
 
 static struct sugov_policy *sugov_policy_alloc(struct cpufreq_policy *policy)
 {
@@ -1317,7 +1297,7 @@ static void sugov_limits(struct cpufreq_policy *policy)
 	sg_policy->need_freq_update = true;
 }
 
-static struct cpufreq_governor schedutil_gov = {
+struct cpufreq_governor schedutil_gov = {
 	.name = "schedutil",
 	.owner = THIS_MODULE,
 	.dynamic_switching = true,
@@ -1340,3 +1320,36 @@ static int __init sugov_register(void)
 	return cpufreq_register_governor(&schedutil_gov);
 }
 fs_initcall(sugov_register);
+
+#ifdef CONFIG_ENERGY_MODEL
+extern bool sched_energy_update;
+extern struct mutex sched_energy_mutex;
+
+static void rebuild_sd_workfn(struct work_struct *work)
+{
+	mutex_lock(&sched_energy_mutex);
+	sched_energy_update = true;
+	rebuild_sched_domains();
+	sched_energy_update = false;
+	mutex_unlock(&sched_energy_mutex);
+}
+static DECLARE_WORK(rebuild_sd_work, rebuild_sd_workfn);
+
+/*
+ * EAS shouldn't be attempted without sugov, so rebuild the sched_domains
+ * on governor changes to make sure the scheduler knows about it.
+ */
+void sched_cpufreq_governor_change(struct cpufreq_policy *policy,
+				  struct cpufreq_governor *old_gov)
+{
+	if (old_gov == &schedutil_gov || policy->governor == &schedutil_gov) {
+		/*
+		 * When called from the cpufreq_register_driver() path, the
+		 * cpu_hotplug_lock is already held, so use a work item to
+		 * avoid nested locking in rebuild_sched_domains().
+		 */
+		schedule_work(&rebuild_sd_work);
+	}
+
+}
+#endif
