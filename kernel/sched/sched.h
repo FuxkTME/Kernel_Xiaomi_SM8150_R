@@ -26,6 +26,7 @@
 #include <linux/kernel_stat.h>
 #include <linux/binfmts.h>
 #include <linux/mutex.h>
+#include <linux/energy_model.h>
 #include <linux/psi.h>
 #include <linux/spinlock.h>
 #include <linux/stop_machine.h>
@@ -3209,4 +3210,12 @@ static inline bool walt_task_skip_min_cpu(struct task_struct *p)
 	return (sched_boost_type != CONSERVATIVE_BOOST) &&
 		get_rtg_status(p) && (p->unfilter);
 }
+#endif
+
+#ifdef CONFIG_SMP
+#ifdef CONFIG_ENERGY_MODEL
+#define perf_domain_span(pd) (to_cpumask(((pd)->em_pd->cpus)))
+#else
+#define perf_domain_span(pd) NULL
+#endif
 #endif
