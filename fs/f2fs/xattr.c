@@ -782,7 +782,6 @@ same:
 		inode->i_ctime = current_time(inode);
 		clear_inode_flag(inode, FI_ACL_MODE);
 	}
-
 		f2fs_inode_xattr_set(inode);
 exit:
 	kfree(base_addr);
