@@ -605,7 +605,11 @@ struct ravg {
 	u32 sum, demand;
 	u32 coloc_demand;
 	u32 sum_history[RAVG_HIST_SIZE_MAX];
+<<<<<<< HEAD
 	u32 *curr_window_cpu, *prev_window_cpu;
+=======
+	u64 proc_load;
+>>>>>>> 8020ca86ab0b ([Performance][RTMM] K16A add rtmm and ktrace feature)
 	u32 curr_window, prev_window;
 	u16 active_windows;
 	u32 pred_demand;
