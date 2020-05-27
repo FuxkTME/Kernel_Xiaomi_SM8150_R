@@ -29,7 +29,7 @@ static struct em_perf_domain *em_create_pd(cpumask_t *span, int nr_states,
 	unsigned long opp_eff, prev_opp_eff = ULONG_MAX;
 	unsigned long power, freq, prev_freq = 0;
 	int i, ret, cpu = cpumask_first(span);
-	struct em_cap_state *table;
+	struct em_perf_state *table;
 	struct em_perf_domain *pd;
 	u64 fmax;
 
@@ -44,26 +44,26 @@ static struct em_perf_domain *em_create_pd(cpumask_t *span, int nr_states,
 	if (!table)
 		goto free_pd;
 
-	/* Build the list of capacity states for this performance domain */
+	/* Build the list of performance states for this performance domain */
 	for (i = 0, freq = 0; i < nr_states; i++, freq++) {
 		/*
 		 * active_power() is a driver callback which ceils 'freq' to
-		 * lowest capacity state of 'cpu' above 'freq' and updates
+		 * lowest performance state of 'cpu' above 'freq' and updates
 		 * 'power' and 'freq' accordingly.
 		 */
 		ret = cb->active_power(&power, &freq, cpu);
 		if (ret) {
-			pr_err("pd%d: invalid cap. state: %d\n", cpu, ret);
-			goto free_cs_table;
+			pr_err("pd%d: invalid perf. state: %d\n", cpu, ret);
+			goto free_ps_table;
 		}
 
 		/*
 		 * We expect the driver callback to increase the frequency for
-		 * higher capacity states.
+		 * higher performance states.
 		 */
 		if (freq <= prev_freq) {
 			pr_err("pd%d: non-increasing freq: %lu\n", cpu, freq);
-			goto free_cs_table;
+			goto free_ps_table;
 		}
 
 		/*
@@ -72,7 +72,7 @@ static struct em_perf_domain *em_create_pd(cpumask_t *span, int nr_states,
 		 */
 		if (!power || power > EM_CPU_MAX_POWER) {
 			pr_err("pd%d: invalid power: %lu\n", cpu, power);
-			goto free_cs_table;
+			goto free_ps_table;
 		}
 
 		table[i].power = power;
@@ -86,12 +86,12 @@ static struct em_perf_domain *em_create_pd(cpumask_t *span, int nr_states,
 		 */
 		opp_eff = freq / power;
 		if (opp_eff >= prev_opp_eff)
-			pr_warn("pd%d: hertz/watts ratio non-monotonically decreasing: em_cap_state %d >= em_cap_state%d\n",
+			pr_warn("pd%d: hertz/watts ratio non-monotonically decreasing: em_perf_state %d >= em_perf_state%d\n",
 					cpu, i, i - 1);
 		prev_opp_eff = opp_eff;
 	}
 
-	/* Compute the cost of each capacity_state. */
+	/* Compute the cost of each performance state. */
 	fmax = (u64) table[nr_states - 1].frequency;
 	for (i = 0; i < nr_states; i++) {
 		table[i].cost = div64_u64(fmax * table[i].power,
@@ -99,12 +99,12 @@ static struct em_perf_domain *em_create_pd(cpumask_t *span, int nr_states,
 	}
 
 	pd->table = table;
-	pd->nr_cap_states = nr_states;
+	pd->nr_perf_states = nr_states;
 	cpumask_copy(to_cpumask(pd->cpus), span);
 
 	return pd;
 
-free_cs_table:
+free_ps_table:
 	kfree(table);
 free_pd:
 	kfree(pd);
@@ -128,7 +128,7 @@ EXPORT_SYMBOL_GPL(em_cpu_get);
 /**
  * em_register_perf_domain() - Register the Energy Model of a performance domain
  * @span	: Mask of CPUs in the performance domain
- * @nr_states	: Number of capacity states to register
+ * @nr_states	: Number of performance states to register
  * @cb		: Callback functions providing the data of the Energy Model
  *
  * Create Energy Model tables for a performance domain using the callbacks
