@@ -6852,7 +6852,7 @@ int dsi_display_get_modes(struct dsi_display *display,
 		if (is_cmd_mode) {
 			dsi_panel_calc_dsi_transfer_time(
 				&display->panel->host_config,
-				&display_mode, frame_threshold_us);
+				&display_mode.timing);
 			display_mode.priv_info->dsi_transfer_time_us =
 				display_mode.timing.dsi_transfer_time_us;
 			display_mode.priv_info->min_dsi_clk_hz =
@@ -7243,14 +7243,8 @@ int dsi_display_set_mode(struct dsi_display *display,
 
 	pr_info("mdp_transfer_time_us=%d us\n",
 			adj_mode.priv_info->mdp_transfer_time_us);
-	pr_info("hactive= %d,vactive= %d,fps=%d\n",
-			timing.h_active, timing.v_active,
-			timing.refresh_rate);
-
-	if (display->panel->cur_mode->timing.refresh_rate != timing.refresh_rate) {
-		if (display->drm_conn && display->drm_conn->kdev)
-			sysfs_notify(&display->drm_conn->kdev->kobj, NULL, "dynamic_fps");
-	}
+	pr_info("hactive= %d, vactive= %d, fps=%d", timing.h_active,
+			timing.v_active, timing.refresh_rate);
 
 	memcpy(display->panel->cur_mode, &adj_mode, sizeof(adj_mode));
 error:
