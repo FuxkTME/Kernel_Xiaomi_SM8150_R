@@ -3887,8 +3887,6 @@ static int ufshcd_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd)
 		hba->lrb[tag].hpb_ctx_id = MAX_HPB_CONTEXT_ID;
 send_orig_cmd:
 #endif
-	/* Vote PM QoS for the request */
-	ufshcd_vops_pm_qos_req_start(hba, cmd->request);
 
 	/* IO svc time latency histogram */
 	if (hba != NULL && cmd->request != NULL) {
@@ -3994,7 +3992,6 @@ out:
 		add_lrbp->cmd = NULL;
 		clear_bit_unlock(add_tag, &hba->lrb_in_use);
 		ufshcd_release_all(hba);
-		ufshcd_vops_pm_qos_req_end(hba, pre_cmd->request, true);
 		ufshcd_complete_lrbp_crypto(hba, pre_cmd, add_lrbp);
 		ufsf_hpb_end_pre_req(&hba->ufsf, pre_cmd->request);
 	}
@@ -11270,15 +11267,11 @@ ufshcd_exit_latency_hist(struct ufs_hba *hba)
  */
 void ufshcd_remove(struct ufs_hba *hba)
 {
-<<<<<<< HEAD
 	ufs_sysfs_remove_nodes(hba->dev);
-=======
-	ufshcd_remove_sysfs_nodes(hba);
 #if defined(CONFIG_UFSFEATURE)
 	ufsf_hpb_release(&hba->ufsf);
 	ufsf_tw_release(&hba->ufsf);
 #endif
->>>>>>> 115b45e97265 ([M700][DDR][HMI_M703_A01-58]Support UFS2.1 WB+HPB)
 	scsi_remove_host(hba->host);
 	/* disable interrupts */
 	ufshcd_disable_intr(hba, hba->intr_mask);
