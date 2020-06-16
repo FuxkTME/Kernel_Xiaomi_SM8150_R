@@ -97,7 +97,7 @@ struct zram_stats {
 					 */
 	atomic64_t meta_data_size;	/* size of zram_entries */
 	atomic64_t miss_free;		/* no. of missed free */
-#ifdef	CONFIG_ZRAM_WRITEBACK
+#if defined(CONFIG_ZRAM_WRITEBACK) || defined(CONFIG_RTMM)
 	atomic64_t bd_count;		/* no. of pages in backing device */
 	atomic64_t bd_reads;		/* no. of reads from backing device */
 	atomic64_t bd_writes;		/* no. of writes from backing device */
@@ -136,7 +136,7 @@ struct zram {
 	bool claim; /* Protected by bdev->bd_mutex */
 	bool use_dedup;
 	struct file *backing_dev;
-#ifdef CONFIG_ZRAM_WRITEBACK
+#if defined(CONFIG_ZRAM_WRITEBACK) || defined(CONFIG_RTMM)
 	spinlock_t wb_limit_lock;
 	bool wb_limit_enable;
 	u64 bd_wb_limit;
