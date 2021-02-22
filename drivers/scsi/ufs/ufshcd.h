@@ -58,6 +58,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/extcon.h>
+#include <linux/pm_qos.h>
 #include "unipro.h"
 
 #include <asm/irq.h>
