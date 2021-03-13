@@ -629,6 +629,7 @@ static ssize_t writeback_store(struct device *dev,
 	struct page *page;
 	ssize_t ret = len;
 	int mode, err;
+	char mode_buf[8];
 	unsigned long blk_idx = 0;
 
 	if (sysfs_streq(buf, "idle"))
