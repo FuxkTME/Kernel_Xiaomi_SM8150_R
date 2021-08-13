@@ -919,11 +919,12 @@ bool dc_skip_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
  * When meet all the 4 conditions at the same time, skip set this bl.
  */
 	if (panel->dc_enable && bl_lvl < panel->dc_threshold && bl_lvl != 0 && panel->dc_type) {
-		return true;
+		return false;
 	} else {
 		return false;
 	}
 }
+
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 {

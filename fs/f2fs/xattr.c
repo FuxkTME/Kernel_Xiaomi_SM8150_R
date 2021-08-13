@@ -3,6 +3,7 @@
  * fs/f2fs/xattr.c
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
+ * Copyright (C) 2021 XiaoMi, Inc.
  *             http://www.samsung.com/
  *
  * Portions of this code from linux/fs/ext2/xattr.c
@@ -27,8 +28,7 @@ static void *xattr_alloc(struct f2fs_sb_info *sbi, int size, bool *is_inline)
 {
 	if (likely(size == sbi->inline_xattr_slab_size)) {
 		*is_inline = true;
-		return f2fs_kmem_cache_alloc(sbi->inline_xattr_slab,
-					GFP_F2FS_ZERO, false, sbi);
+		return kmem_cache_zalloc(sbi->inline_xattr_slab, GFP_NOFS);
 	}
 	*is_inline = false;
 	return f2fs_kzalloc(sbi, size, GFP_NOFS);
@@ -130,6 +130,28 @@ static int f2fs_xattr_advise_set(const struct xattr_handler *handler,
 	F2FS_I(inode)->i_advise = new_advise;
 	f2fs_mark_inode_dirty_sync(inode, true);
 	return 0;
+}
+
+static struct inode *get_parent_inode(struct inode *inode)
+{
+	struct inode *dir = NULL;
+	struct dentry *dentry, *parent;
+
+	dentry = d_find_alias(inode);
+	if (!dentry)
+		goto out;
+
+	parent = dget_parent(dentry);
+	if (!parent)
+		goto out_dput;
+
+	dir = igrab(d_inode(parent));
+	dput(parent);
+
+out_dput:
+	dput(dentry);
+out:
+	return dir;
 }
 
 #ifdef CONFIG_F2FS_FS_SECURITY
@@ -682,8 +704,15 @@ static int __f2fs_setxattr(struct inode *inode, int index,
 	}
 
 	last = here;
-	while (!IS_XATTR_LAST_ENTRY(last))
+	while (!IS_XATTR_LAST_ENTRY(last)) {
+		if ((void *)(last) + sizeof(__u32) > last_base_addr ||
+			(void *)XATTR_NEXT_ENTRY(last) > last_base_addr) {
+			set_sbi_flag(F2FS_I_SB(inode), SBI_NEED_FSCK);
+			error = -EFSCORRUPTED;
+			goto exit;
+		}
 		last = XATTR_NEXT_ENTRY(last);
+	}
 
 	newsize = XATTR_ALIGN(sizeof(struct f2fs_xattr_entry) + len + size);
 
@@ -754,6 +783,7 @@ same:
 		clear_inode_flag(inode, FI_ACL_MODE);
 	}
 
+		f2fs_inode_xattr_set(inode);
 exit:
 	kfree(base_addr);
 	return error;
@@ -812,4 +842,52 @@ int f2fs_init_xattr_caches(struct f2fs_sb_info *sbi)
 void f2fs_destroy_xattr_caches(struct f2fs_sb_info *sbi)
 {
 	kmem_cache_destroy(sbi->inline_xattr_slab);
+}
+
+void f2fs_inode_xattr_set(struct inode *inode)
+{
+	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+	struct f2fs_inode_info *fi = F2FS_I(inode);
+
+	spin_lock(&sbi->xattr_set_dir_ilist_lock);
+	if (list_empty(&fi->xattr_dirty_list))
+		list_add_tail(&fi->xattr_dirty_list, &sbi->xattr_set_dir_ilist);
+	spin_unlock(&sbi->xattr_set_dir_ilist_lock);
+}
+
+void f2fs_remove_xattr_set_inode(struct inode *inode)
+{
+	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+	struct f2fs_inode_info *fi = F2FS_I(inode);
+
+	spin_lock(&sbi->xattr_set_dir_ilist_lock);
+	if (!list_empty(&fi->xattr_dirty_list))
+		list_del_init(&fi->xattr_dirty_list);
+	spin_unlock(&sbi->xattr_set_dir_ilist_lock);
+}
+
+void f2fs_clear_xattr_set_ilist(struct f2fs_sb_info *sbi)
+{
+	struct list_head *pos, *n;
+
+	spin_lock(&sbi->xattr_set_dir_ilist_lock);
+	list_for_each_safe(pos, n, &sbi->xattr_set_dir_ilist)
+		list_del_init(pos);
+	spin_unlock(&sbi->xattr_set_dir_ilist_lock);
+}
+
+int f2fs_parent_inode_xattr_set(struct inode *inode)
+{
+	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+	struct inode *dir = get_parent_inode(inode);
+	int ret = 0;
+
+	if (dir) {
+		spin_lock(&sbi->xattr_set_dir_ilist_lock);
+		ret = !list_empty(&F2FS_I(dir)->xattr_dirty_list);
+		spin_unlock(&sbi->xattr_set_dir_ilist_lock);
+		iput(dir);
+	}
+
+	return ret;
 }
