@@ -229,6 +229,7 @@ obj-$(CONFIG_ASN1) += asn1_decoder.o
 
 obj-$(CONFIG_FONT_SUPPORT) += fonts/
 
+obj-$(CONFIG_CJSON) += cJSON.o
 
 obj-$(CONFIG_PRIME_NUMBERS) += prime_numbers.o
 
