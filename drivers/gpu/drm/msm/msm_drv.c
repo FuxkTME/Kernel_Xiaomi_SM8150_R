@@ -61,12 +61,10 @@
 #define MSM_VERSION_MINOR	2
 #define MSM_VERSION_PATCHLEVEL	0
 
-<<<<<<< HEAD
-static DEFINE_MUTEX(msm_release_lock);
-=======
 atomic_t resume_pending;
 wait_queue_head_t resume_wait_q;
->>>>>>> 9413b211931a (drm: import Xiaomi changes from phoenix-r-oss)
+
+static DEFINE_MUTEX(msm_release_lock);
 
 static void msm_fb_output_poll_changed(struct drm_device *dev)
 {

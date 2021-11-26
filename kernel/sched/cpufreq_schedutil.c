@@ -651,6 +651,13 @@ static ssize_t down_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 	return sprintf(buf, "%u\n", tunables->down_rate_limit_us);
 }
 
+static void sugov_tunables_free(struct kobject *kobj)
+{
+	struct gov_attr_set *attr_set = container_of(kobj, struct gov_attr_set, kobj);
+
+	kfree(to_sugov_tunables(attr_set));
+}
+
 static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 				      const char *buf, size_t count)
 {
@@ -776,13 +783,6 @@ static struct attribute *sugov_attributes[] = {
 	NULL
 };
 
-static void sugov_tunables_free(struct kobject *kobj)
-{
-	struct gov_attr_set *attr_set = container_of(kobj, struct gov_attr_set, kobj);
-
-	kfree(to_sugov_tunables(attr_set));
-}
-
 static struct kobj_type sugov_tunables_ktype = {
 	.default_attrs = sugov_attributes,
 	.sysfs_ops = &governor_sysfs_ops,
@@ -877,7 +877,6 @@ static struct sugov_tunables *sugov_tunables_alloc(struct sugov_policy *sg_polic
 	return tunables;
 }
 
-<<<<<<< HEAD
 static void sugov_tunables_save(struct cpufreq_policy *policy,
 		struct sugov_tunables *tunables)
 {
@@ -904,12 +903,6 @@ static void sugov_tunables_save(struct cpufreq_policy *policy,
 }
 
 static void sugov_clear_global_tunables(void)
-{
-	if (!have_governor_per_policy())
-		global_tunables = NULL;
-}
-
-static void sugov_tunables_free(struct sugov_tunables *tunables)
 {
 	if (!have_governor_per_policy())
 		global_tunables = NULL;
