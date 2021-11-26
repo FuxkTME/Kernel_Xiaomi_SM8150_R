@@ -76,7 +76,6 @@ modules.builtin
 !.gitignore
 !.mailmap
 !.cocciconfig
-!.clang-format
 
 #
 # Generated include files
@@ -131,3 +130,8 @@ kernel/configs/android-*.cfg
 #Ignoring Android.bp link file
 #
 Android.bp
+
+# Ignore output files
+out/*
+/out_raphael
+/out_cepheus
