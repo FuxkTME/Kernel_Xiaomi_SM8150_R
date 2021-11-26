@@ -375,17 +375,17 @@ HOSTCFLAGS  += -Wno-unused-value -Wno-unused-parameter \
 endif
 
 # Make variables (CC, etc...)
-AS		= (CROSS_COMPILE)as
+AS		= llvm-as-ndk
 LD		= $(CROSS_COMPILE)ld
 CC		= $(CROSS_COMPILE)gcc
 LDGOLD		= $(CROSS_COMPILE)ld.gold
-LDLLD		= ld.lld
+LDLLD		= ld.lld-ndk
 CPP		= $(CC) -E
-AR		= llvm-ar
-NM		= llvm-nm
-STRIP		= llvm-strip
-OBJCOPY		= llvm-objcopy
-OBJDUMP		= llvm-objdump
+AR		= llvm-ar-ndk
+NM		= llvm-nm-ndk
+STRIP		= llvm-strip-ndk
+OBJCOPY		= llvm-objcopy-ndk
+OBJDUMP		= llvm-objdump-ndk
 AWK		= awk
 GENKSYMS	= scripts/genksyms/genksyms
 INSTALLKERNEL  := installkernel
@@ -688,8 +688,8 @@ LDFLAGS		+= -plugin LLVMgold.so
 endif
 # use llvm-ar for building symbol tables from IR files, and llvm-dis instead
 # of objdump for processing symbol versions and exports
-LLVM_AR		:= llvm-ar
-LLVM_NM		:= llvm-nm
+LLVM_AR		:= llvm-ar-ndk
+LLVM_NM		:= llvm-nm-ndk
 export LLVM_AR LLVM_NM
 endif
 
