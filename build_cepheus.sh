@@ -5,14 +5,12 @@ white='\033[0m'
 red='\033[0;31m'
 gre='\e[0;32m'
 
-ANYKERNEL3_DIR=$PWD/AnyKernel3
-FINAL_KERNEL_ZIP=kernel-Tucana-r-VoyagerIII-$(git rev-parse --short=7 HEAD).zip
 IMAGE_GZ=$PWD/out/arch/arm64/boot/Image.gz
 ccache_=`which ccache`
 export ARCH=arm64
 export SUBARCH=arm64
 export HEADER_ARCH=arm64
-export CLANG_PATH=/root/ndk/toolchains/llvm/prebuilt/linux-aarch64
+export CLANG_PATH=
 
 export KBUILD_BUILD_HOST="Voayger-sever"
 export KBUILD_BUILD_USER="TheVoyager"

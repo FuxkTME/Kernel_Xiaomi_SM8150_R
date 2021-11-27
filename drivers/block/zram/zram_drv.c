@@ -2061,6 +2061,7 @@ static int zram_add(void)
 	}
 #ifdef CONFIG_ZRAM_DEDUP
 	zram->use_dedup = true;
+#endif
 
 	blk_queue_make_request(queue, zram_make_request);
 

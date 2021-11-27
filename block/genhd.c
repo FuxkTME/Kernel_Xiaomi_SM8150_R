@@ -1453,26 +1453,6 @@ struct gendisk *alloc_disk_node(int minors, int node_id)
 }
 EXPORT_SYMBOL(alloc_disk_node);
 
-struct gendisk *__blk_alloc_disk(int node)
-{
-	struct request_queue *q;
-	struct gendisk *disk;
-	struct lock_class_key *lkclass;
-
-	q = blk_alloc_queue(node);
-	if (!q)
-		return NULL;
-
-	disk = __alloc_disk_node(0, node, lkclass);
-	if (!disk) {
-		blk_cleanup_queue(q);
-		return NULL;
-	}
-	disk->queue = q;
-	return disk;
-}
-EXPORT_SYMBOL(__blk_alloc_disk);
-
 struct kobject *get_disk(struct gendisk *disk)
 {
 	struct module *owner;
