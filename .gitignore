@@ -135,3 +135,7 @@ Android.bp
 out/*
 /out_raphael
 /out_cepheus
+Image
+Image-dtb
+Image.gz
+Image.gz-dtb
