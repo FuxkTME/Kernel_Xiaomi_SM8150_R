@@ -473,6 +473,8 @@ struct binder_proc {
 	struct binder_priority default_priority;
 	struct dentry *debugfs_entry;
 	struct binder_alloc alloc;
+	struct mutex files_lock;
+	const struct cred *cred;
 	struct binder_context *context;
 	spinlock_t inner_lock;
 	spinlock_t outer_lock;
