@@ -18,7 +18,6 @@
 #include <linux/sched/mm.h>
 #include <linux/list.h>
 #include <linux/slab.h>
-#include <linux/kcov.h>
 #include <linux/ioctl.h>
 #include <linux/usb.h>
 #include <linux/usbdevice_fs.h>
@@ -29,7 +28,6 @@
 #include <linux/mutex.h>
 #include <linux/random.h>
 #include <linux/pm_qos.h>
-#include <soc/qcom/boot_stats.h>
 
 #include <linux/uaccess.h>
 #include <asm/byteorder.h>
@@ -40,8 +38,6 @@
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define USB_VENDOR_SMSC				0x0424
 #define USB_PRODUCT_USB5534B			0x5534
-#define USB_VENDOR_CYPRESS			0x04b4
-#define USB_PRODUCT_CY7C65632			0x6570
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
 #define HUB_QUIRK_DISABLE_AUTOSUSPEND		0x02
 
@@ -56,11 +52,6 @@ static void hub_event(struct work_struct *work);
 
 /* synchronize hub-port add/remove and peering operations */
 DEFINE_MUTEX(usb_port_peer_mutex);
-
-static bool skip_extended_resume_delay = 1;
-module_param(skip_extended_resume_delay, bool, 0644);
-MODULE_PARM_DESC(skip_extended_resume_delay,
-		"removes extra delay added to finish bus resume");
 
 /* cycle leds on hubs that aren't blinking for attention */
 static bool blinkenlights;
@@ -144,7 +135,6 @@ struct usb_hub *usb_hub_to_struct_hub(struct usb_device *hdev)
 int usb_device_supports_lpm(struct usb_device *udev)
 {
 	/* Some devices have trouble with LPM */
-		return 0;
 	if (udev->quirks & USB_QUIRK_NO_LPM)
 		return 0;
 
@@ -652,12 +642,6 @@ void usb_kick_hub_wq(struct usb_device *hdev)
 	if (hub)
 		kick_hub_wq(hub);
 }
-
-void usb_flush_hub_wq(void)
-{
-	flush_workqueue(hub_wq);
-}
-EXPORT_SYMBOL(usb_flush_hub_wq);
 
 /*
  * Let the USB core know that a USB 3.0 device has sent a Function Wake Device
@@ -1742,6 +1726,47 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
 	desc = intf->cur_altsetting;
 	hdev = interface_to_usbdev(intf);
+
+	/*
+	 * Set default autosuspend delay as 0 to speedup bus suspend,
+	 * based on the below considerations:
+	 *
+	 * - Unlike other drivers, the hub driver does not rely on the
+	 *   autosuspend delay to provide enough time to handle a wakeup
+	 *   event, and the submitted status URB is just to check future
+	 *   change on hub downstream ports, so it is safe to do it.
+	 *
+	 * - The patch might cause one or more auto supend/resume for
+	 *   below very rare devices when they are plugged into hub
+	 *   first time:
+	 *
+	 *   	devices having trouble initializing, and disconnect
+	 *   	themselves from the bus and then reconnect a second
+	 *   	or so later
+	 *
+	 *   	devices just for downloading firmware, and disconnects
+	 *   	themselves after completing it
+	 *
+	 *   For these quite rare devices, their drivers may change the
+	 *   autosuspend delay of their parent hub in the probe() to one
+	 *   appropriate value to avoid the subtle problem if someone
+	 *   does care it.
+	 *
+	 * - The patch may cause one or more auto suspend/resume on
+	 *   hub during running 'lsusb', but it is probably too
+	 *   infrequent to worry about.
+	 *
+	 * - Change autosuspend delay of hub can avoid unnecessary auto
+	 *   suspend timer for hub, also may decrease power consumption
+	 *   of USB bus.
+	 *
+	 * - If user has indicated to prevent autosuspend by passing
+	 *   usbcore.autosuspend = -1 then keep autosuspend disabled.
+	 */
+#ifdef CONFIG_PM
+	if (hdev->dev.power.autosuspend_delay >= 0)
+		pm_runtime_set_autosuspend_delay(&hdev->dev, 0);
+#endif
 
 	/*
 	 * Hubs have proper suspend/resume support, except for root hubs
@@ -3464,16 +3489,16 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 		/* drive resume for USB_RESUME_TIMEOUT msec */
 		dev_dbg(&udev->dev, "usb %sresume\n",
 				(PMSG_IS_AUTO(msg) ? "auto-" : ""));
-		if (!skip_extended_resume_delay ||
-				udev->parent != udev->bus->root_hub)
-			usleep_range(USB_RESUME_TIMEOUT * 1000,
-					(USB_RESUME_TIMEOUT + 1) * 1000);
+		msleep(USB_RESUME_TIMEOUT);
 
 		/* Virtual root hubs can trigger on GET_PORT_STATUS to
 		 * stop resume signaling.  Then finish the resume
 		 * sequence.
 		 */
 		status = hub_port_status(hub, port1, &portstatus, &portchange);
+
+		/* TRSMRCY = 10 msec */
+		msleep(10);
 	}
 
  SuspendCleared:
@@ -3488,9 +3513,6 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 				usb_clear_port_feature(hub->hdev, port1,
 						USB_PORT_FEAT_C_SUSPEND);
 		}
-
-		/* TRSMRCY = 10 msec */
-		usleep_range(10000, 10500);
 	}
 
 	if (udev->persist_enabled)
@@ -3597,7 +3619,6 @@ static int hub_suspend(struct usb_interface *intf, pm_message_t msg)
 {
 	struct usb_hub		*hub = usb_get_intfdata(intf);
 	struct usb_device	*hdev = hub->hdev;
-	struct usb_hcd		*hcd = bus_to_hcd(hdev->bus);
 	unsigned		port1;
 	int			status;
 
@@ -3631,9 +3652,6 @@ static int hub_suspend(struct usb_interface *intf, pm_message_t msg)
 	}
 
 	if (hub_is_superspeed(hdev) && hdev->do_remote_wakeup) {
-		if (!hdev->parent && hcd->primary_hcd)
-			usb_phy_powerup(hcd->primary_hcd->usb3_phy);
-
 		/* Enable hub to send remote wakeup for all ports. */
 		for (port1 = 1; port1 <= hdev->maxchild; port1++) {
 			status = set_port_feature(hdev,
@@ -3643,9 +3661,6 @@ static int hub_suspend(struct usb_interface *intf, pm_message_t msg)
 					USB_PORT_FEAT_REMOTE_WAKE_OVER_CURRENT,
 					USB_PORT_FEAT_REMOTE_WAKE_MASK);
 		}
-
-		if (!hdev->parent && hcd->primary_hcd)
-			usb_phy_powerdown(hcd->primary_hcd->usb3_phy);
 	}
 
 	dev_dbg(&intf->dev, "%s\n", __func__);
@@ -3887,47 +3902,6 @@ static int usb_set_lpm_timeout(struct usb_device *udev,
 }
 
 /*
- * Don't allow device intiated U1/U2 if the system exit latency + one bus
- * interval is greater than the minimum service interval of any active
- * periodic endpoint. See USB 3.2 section 9.4.9
- */
-static bool usb_device_may_initiate_lpm(struct usb_device *udev,
-					enum usb3_link_state state)
-{
-	unsigned int sel;		/* us */
-	int i, j;
-
-	if (state == USB3_LPM_U1)
-		sel = DIV_ROUND_UP(udev->u1_params.sel, 1000);
-	else if (state == USB3_LPM_U2)
-		sel = DIV_ROUND_UP(udev->u2_params.sel, 1000);
-	else
-		return false;
-
-	for (i = 0; i < udev->actconfig->desc.bNumInterfaces; i++) {
-		struct usb_interface *intf;
-		struct usb_endpoint_descriptor *desc;
-		unsigned int interval;
-
-		intf = udev->actconfig->interface[i];
-		if (!intf)
-			continue;
-
-		for (j = 0; j < intf->cur_altsetting->desc.bNumEndpoints; j++) {
-			desc = &intf->cur_altsetting->endpoint[j].desc;
-
-			if (usb_endpoint_xfer_int(desc) ||
-			    usb_endpoint_xfer_isoc(desc)) {
-				interval = (1 << (desc->bInterval - 1)) * 125;
-				if (sel + 125 > interval)
-					return false;
-			}
-		}
-	}
-	return true;
-}
-
-/*
  * Enable the hub-initiated U1/U2 idle timeouts, and enable device-initiated
  * U1/U2 entry.
  *
@@ -3999,23 +3973,20 @@ static void usb_enable_link_state(struct usb_hcd *hcd, struct usb_device *udev,
 	 * U1/U2_ENABLE
 	 */
 	if (udev->actconfig &&
-	    usb_device_may_initiate_lpm(udev, state)) {
-		if (usb_set_device_initiated_lpm(udev, state, true)) {
-			/*
-			 * Request to enable device initiated U1/U2 failed,
-			 * better to turn off lpm in this case.
-			 */
-			usb_set_lpm_timeout(udev, state, 0);
-			hcd->driver->disable_usb3_lpm_timeout(hcd, udev, state);
-			return;
-		}
+	    usb_set_device_initiated_lpm(udev, state, true) == 0) {
+		if (state == USB3_LPM_U1)
+			udev->usb3_lpm_u1_enabled = 1;
+		else if (state == USB3_LPM_U2)
+			udev->usb3_lpm_u2_enabled = 1;
+	} else {
+		/* Don't request U1/U2 entry if the device
+		 * cannot transition to U1/U2.
+		 */
+		usb_set_lpm_timeout(udev, state, 0);
+		hcd->driver->disable_usb3_lpm_timeout(hcd, udev, state);
 	}
-
-	if (state == USB3_LPM_U1)
-		udev->usb3_lpm_u1_enabled = 1;
-	else if (state == USB3_LPM_U2)
-		udev->usb3_lpm_u2_enabled = 1;
 }
+
 /*
  * Disable the hub-initiated U1/U2 idle timeouts, and disable device-initiated
  * U1/U2 entry.
@@ -4440,8 +4411,6 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 	const char		*speed;
 	int			devnum = udev->devnum;
 	const char		*driver_name;
-	char			*error_event[] = {
-				"USB_DEVICE_ERROR=Device_No_Response", NULL };
 
 	/* root hub ports have a slightly longer reset period
 	 * (from USB 2.0 spec, section 7.1.7.5)
@@ -4629,8 +4598,6 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 				if (r != -ENODEV)
 					dev_err(&udev->dev, "device descriptor read/64, error %d\n",
 							r);
-				kobject_uevent_env(&udev->parent->dev.kobj,
-						KOBJ_CHANGE, error_event);
 				retval = -EMSGSIZE;
 				continue;
 			}
@@ -4683,8 +4650,6 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 				dev_err(&udev->dev,
 					"device descriptor read/8, error %d\n",
 					retval);
-			kobject_uevent_env(&udev->parent->dev.kobj,
-						KOBJ_CHANGE, error_event);
 			if (retval >= 0)
 				retval = -EMSGSIZE;
 		} else {
@@ -4755,8 +4720,7 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 	/* notify HCD that we have a device connected and addressed */
 	if (hcd->driver->update_device)
 		hcd->driver->update_device(hcd, udev);
-	if (0) /*disable USB 2.0 Link PM to fix long time usb storage recognition issue*/
-		hub_set_initial_usb2_lpm_policy(udev);
+	hub_set_initial_usb2_lpm_policy(udev);
 fail:
 	if (retval) {
 		hub_port_disable(hub, port1, 0);
@@ -5245,8 +5209,6 @@ static void hub_event(struct work_struct *work)
 	hub_dev = hub->intfdev;
 	intf = to_usb_interface(hub_dev);
 
-	kcov_remote_start_usb((u64)hdev->bus->busnum);
-
 	dev_dbg(hub_dev, "state %d ports %d chg %04x evt %04x\n",
 			hdev->state, hdev->maxchild,
 			/* NOTE: expects max 15 ports... */
@@ -5353,8 +5315,6 @@ out_hdev_lock:
 	/* Balance the stuff in kick_hub_wq() and allow autosuspend */
 	usb_autopm_put_interface(intf);
 	kref_put(&hub->kref, hub_release);
-
-	kcov_remote_stop();
 }
 
 static const struct usb_device_id hub_id_table[] = {
@@ -5364,11 +5324,6 @@ static const struct usb_device_id hub_id_table[] = {
       .idVendor = USB_VENDOR_SMSC,
       .idProduct = USB_PRODUCT_USB5534B,
       .bInterfaceClass = USB_CLASS_HUB,
-      .driver_info = HUB_QUIRK_DISABLE_AUTOSUSPEND},
-    { .match_flags = USB_DEVICE_ID_MATCH_VENDOR
-                   | USB_DEVICE_ID_MATCH_PRODUCT,
-      .idVendor = USB_VENDOR_CYPRESS,
-      .idProduct = USB_PRODUCT_CY7C65632,
       .driver_info = HUB_QUIRK_DISABLE_AUTOSUSPEND},
     { .match_flags = USB_DEVICE_ID_MATCH_VENDOR
 			| USB_DEVICE_ID_MATCH_INT_CLASS,
@@ -5562,7 +5517,6 @@ static int usb_reset_and_verify_device(struct usb_device *udev)
 	struct usb_hcd			*hcd = bus_to_hcd(udev->bus);
 	struct usb_device_descriptor	descriptor = udev->descriptor;
 	struct usb_host_bos		*bos;
-	char				buf[50];
 	int				i, j, ret = 0;
 	int				port1 = udev->portnum;
 
@@ -5649,15 +5603,6 @@ static int usb_reset_and_verify_device(struct usb_device *udev)
 	}
 	mutex_unlock(hcd->bandwidth_mutex);
 	usb_set_device_state(udev, USB_STATE_CONFIGURED);
-
-	/* Skip this marker for root-hubs */
-	if (udev->parent != NULL) {
-		scnprintf(buf, sizeof(buf),
-				"USB device reset with VID=%04x, PID=%04x ",
-				le16_to_cpu(udev->descriptor.idVendor),
-				le16_to_cpu(udev->descriptor.idProduct));
-		update_marker(buf);
-	}
 
 	/* Put interfaces back into the same altsettings as before.
 	 * Don't bother to send the Set-Interface request for interfaces
