@@ -84,7 +84,10 @@ implementation.
 
 .. toctree::
    :maxdepth: 2
-
+   
+   staging/index
+   watch_queue
+   
    sh/index
    x86/index
 

@@ -64,6 +64,7 @@ configure specific aspects of kernel behavior to your liking.
    unicode
    vga-softcursor
    binfmt-misc
+   blockdev/index
    mono
    java
    ras
