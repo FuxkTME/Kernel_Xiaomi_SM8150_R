@@ -110,4 +110,5 @@ static inline void pd_phy_close(void)
 {
 }
 #endif
+
 #endif /* _USBPD_H */
