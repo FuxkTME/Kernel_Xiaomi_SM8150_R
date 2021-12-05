@@ -359,7 +359,6 @@ static int get_step_chg_jeita_setting_from_profile(struct step_chg_info *chip)
 					rc);
 		chip->sw_jeita_cfg_valid = false;
 	}
-
 	return rc;
 }
 
@@ -563,7 +562,6 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 	else
 		rc = power_supply_get_property(chip->batt_psy,
 				chip->step_chg_config->param.psy_prop, &pval);
-
 	if (rc < 0) {
 		pr_err("Couldn't read %s property rc=%d\n",
 			chip->step_chg_config->param.prop_name, rc);
@@ -655,7 +653,6 @@ static int handle_jeita(struct step_chg_info *chip)
 				chip->jeita_fcc_config->param.prop_name, rc);
 		return rc;
 	}
-
 	rc = get_val(chip->jeita_fcc_config->fcc_cfg,
 			chip->jeita_fcc_config->param.hysteresis,
 			chip->jeita_fcc_index,

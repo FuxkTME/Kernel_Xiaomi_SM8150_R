@@ -427,8 +427,7 @@ static int smb5_parse_dt(struct smb5 *chip)
 	chg->pd_not_supported = chg->pd_not_supported ||
 			of_property_read_bool(node, "qcom,usb-pd-disable");
 
-	chg->lpd_disabled = chg->lpd_disabled ||
-			of_property_read_bool(node, "qcom,lpd-disable");
+	chg->lpd_disabled = of_property_read_bool(node, "qcom,lpd-disable");
 
 	rc = of_property_read_u32(node, "qcom,wd-bark-time-secs",
 					&chip->dt.wd_bark_time);
@@ -591,6 +590,7 @@ static int smb5_parse_dt(struct smb5 *chip)
 					"qcom,adc-based-aicl");
 
 	/* Extract ADC channels */
+
 	rc = smblib_get_iio_channel(chg, "mid_voltage", &chg->iio.mid_chan);
 	if (rc < 0)
 		return rc;
@@ -759,6 +759,7 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		rc = smblib_get_prop_usb_present(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
+
 		rc = smblib_get_prop_usb_online(chg, val);
 		if (!val->intval)
 			break;
@@ -1097,6 +1098,7 @@ static int smb5_usb_port_get_prop(struct power_supply *psy,
 		val->intval = POWER_SUPPLY_TYPE_USB;
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
+
 		rc = smblib_get_prop_usb_online(chg, val);
 		if (!val->intval)
 			break;
@@ -1291,7 +1293,6 @@ static int smb5_usb_main_set_prop(struct power_supply *psy,
 		rc = smblib_get_qc3_main_icl_offset(chg, &offset_ua);
 		if (rc < 0)
 			offset_ua = 0;
-
 		rc = smblib_set_charge_param(chg, &chg->param.fcc,
 						val->intval + offset_ua);
 		break;
@@ -1466,9 +1467,6 @@ static int smb5_dc_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_DC_RESET:
 		val->intval = 0;
-		break;
-	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION:
-		rc = smblib_get_prop_voltage_wls_output(chg, val);
 		break;
 	default:
 		return -EINVAL;
@@ -1656,8 +1654,6 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		rc = smblib_get_prop_from_bms(chg,
 				POWER_SUPPLY_PROP_CURRENT_NOW, val);
-		if (!rc)
-			val->intval *= (-1);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_QNOVO:
 		val->intval = get_client_vote_locked(chg->fcc_votable,
@@ -2699,16 +2695,13 @@ static int smb5_init_hw(struct smb5 *chip)
 	vote(chg->fcc_votable,
 		BATT_PROFILE_VOTER, chg->batt_profile_fcc_ua > 0,
 		chg->batt_profile_fcc_ua);
-	vote(chg->fv_votable,
-		BATT_PROFILE_VOTER, chg->batt_profile_fv_uv > 0,
-		chg->batt_profile_fv_uv);
-
 	/* Some h/w limit maximum supported ICL */
 	vote(chg->usb_icl_votable, HW_LIMIT_VOTER,
 			chg->hw_max_icl_ua > 0, chg->hw_max_icl_ua);
 
 	/* Initialize DC peripheral configurations */
 	rc = smb5_init_dc_peripheral(chg);
+
 	if (rc < 0)
 		return rc;
 
@@ -3087,7 +3080,6 @@ static struct smb_irq_info smb5_irqs[] = {
 	[BAT_TEMP_IRQ] = {
 		.name		= "bat-temp",
 		.handler	= batt_temp_changed_irq_handler,
-		.wake		= true,
 	},
 	[ALL_CHNL_CONV_DONE_IRQ] = {
 		.name		= "all-chnl-conv-done",
@@ -3184,7 +3176,6 @@ static struct smb_irq_info smb5_irqs[] = {
 	[TYPEC_OR_RID_DETECTION_CHANGE_IRQ] = {
 		.name		= "typec-or-rid-detect-change",
 		.handler	= typec_or_rid_detection_change_irq_handler,
-		.wake           = true,
 	},
 	[TYPEC_VPD_DETECT_IRQ] = {
 		.name		= "typec-vpd-detect",
@@ -3692,7 +3683,6 @@ static int smb5_probe(struct platform_device *pdev)
 		pr_err("Failed in getting charger status rc=%d\n", rc);
 		goto free_irq;
 	}
-
 	device_init_wakeup(chg->dev, true);
 
 	pr_info("QPNP SMB5 probed successfully\n");
