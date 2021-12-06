@@ -317,7 +317,6 @@ enum {
 
 #define USBIN_5V_AICL_THRESHOLD_REG		(USBIN_BASE + 0x81)
 #define USBIN_CONT_AICL_THRESHOLD_REG		(USBIN_BASE + 0x84)
-
 /********************************
  *  DCIN Peripheral Registers   *
  ********************************/
@@ -458,6 +457,7 @@ enum {
 #define EN_MICRO_USB_WATER_PROTECTION_BIT		BIT(4)
 #define MICRO_USB_DETECTION_ON_TIME_CFG_MASK		GENMASK(3, 2)
 #define MICRO_USB_DETECTION_PERIOD_CFG_MASK		GENMASK(1, 0)
+
 #define PMI632_TYPEC_MICRO_USB_MODE_REG		(TYPEC_BASE + 0x73)
 #define MICRO_USB_MODE_ONLY_BIT			BIT(0)
 /********************************
@@ -515,6 +515,7 @@ enum {
 #define WATCHDOG_TRIGGER_AFP_EN_BIT		BIT(7)
 #define BARK_WDOG_INT_EN_BIT			BIT(6)
 #define WDOG_TIMER_EN_ON_PLUGIN_BIT		BIT(1)
+
 #define SNARL_BARK_BITE_WD_CFG_REG		(MISC_BASE + 0x53)
 #define BITE_WDOG_DISABLE_CHARGING_CFG_BIT	BIT(7)
 #define SNARL_WDOG_TIMEOUT_MASK                 GENMASK(6, 4)

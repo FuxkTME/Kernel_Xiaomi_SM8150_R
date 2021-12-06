@@ -406,6 +406,18 @@ void fg_notify_charger(struct fg_dev *fg)
 			return;
 		}
 	}
+
+	if (fg->bp.fastchg_curr_ma > 0) {
+		prop.intval = fg->bp.fastchg_curr_ma * 1000;
+		rc = power_supply_set_property(fg->batt_psy,
+				POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+				&prop);
+		if (rc < 0) {
+			pr_err("Error in setting constant_charge_current_max property on batt_psy, rc=%d\n",
+				rc);
+			return;
+		}
+	}
 }
 
 bool batt_psy_initialized(struct fg_dev *fg)
