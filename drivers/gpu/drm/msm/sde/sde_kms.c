@@ -2074,20 +2074,6 @@ static int _sde_kms_remove_fbs(struct sde_kms *sde_kms, struct drm_file *file,
 		drm_atomic_state_put(state);
 		return 0;
 	}
-
-	drm_for_each_crtc(crtc, dev) {
-		if ((crtc_mask & drm_crtc_mask(crtc)) && crtc->state->active) {
-			struct drm_encoder *drm_enc;
-
-			drm_for_each_encoder_mask(drm_enc, crtc->dev,
-					crtc->state->encoder_mask)
-				ret = sde_kms_set_crtc_for_conn(
-					dev, drm_enc, state);
-		}
-	}
-
-	SDE_EVT32(state, crtc_mask);
-	SDE_DEBUG("null commit after removing all the pipes\n");
 	ret = drm_atomic_commit(state);
 
 	if (ret) {

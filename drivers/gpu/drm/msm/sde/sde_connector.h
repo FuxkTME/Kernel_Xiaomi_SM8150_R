@@ -457,6 +457,7 @@ struct sde_connector {
 
 	bool last_cmd_tx_sts;
 	bool hdr_capable;
+	struct mi_dimlayer_state mi_dimlayer_state;
 };
 
 /**

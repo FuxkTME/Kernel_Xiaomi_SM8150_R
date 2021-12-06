@@ -743,7 +743,7 @@ error:
 	return rc;
 }
 
-intint dsi_panel_set_doze_backlight(struct dsi_display *display)
+int dsi_panel_set_doze_backlight(struct dsi_display *display)
 {
 	int rc = 0;
 	struct dsi_display *dsi_display = display;
@@ -868,8 +868,6 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		panel->last_bl_lvl = bl_temp;
 		return rc;
 	}
-
-	struct dsi_backlight_config *bl = &panel->bl_config;
 
 	if (panel->host_config.ext_bridge_num)
 		return 0;
@@ -3841,17 +3839,6 @@ static int dsi_panel_parse_mi_config(struct dsi_panel *panel,
 	panel->panel_dead_flag = false;
 	panel->tddi_doubleclick_flag = false;
 
-	register_hw_monitor_info(HWMON_CONPONENT_NAME);
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_ACTIVE, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_REFRESH, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_BOOTTIME, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_DAYS, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_BL_AVG, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_BL_HIGH, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_BL_LOW, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_HBM_DRUATION, "0");
-	add_hw_monitor_info(HWMON_CONPONENT_NAME, HWMON_KEY_HBM_TIMES, "0");
-
 
 	return rc;
 }
@@ -3887,13 +3874,6 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 
 	panel_model = utils->get_property(utils->data,
 				"qcom,mdss-dsi-panel-model", NULL);
-	if (panel_model) {
-		register_hw_component_info(HWCONPONENT_NAME);
-		add_hw_component_info(HWCONPONENT_NAME, HWCONPONENT_KEY_LCD, (char *)panel_model);
-	}
-
-	dispparam_enabled = utils->read_bool(utils->data,
-				"qcom,dispparam-enabled" );
 	if (dispparam_enabled){
 		pr_info("[LCD]%s:%d Dispparam enabled.\n", __func__, __LINE__);
 		panel->dispparam_enabled = true;
