@@ -5318,7 +5318,7 @@ static ssize_t sysfs_doze_mode_write(struct device *dev,
 	return count;
 }
 
-static ssize_t ;(struct device *dev,
+static ssize_t sysfs_hbm_read(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct dsi_display *display = dev_get_drvdata(dev);
@@ -5380,10 +5380,6 @@ static DEVICE_ATTR(doze_status, 0644,
 static DEVICE_ATTR(doze_mode, 0644,
 			sysfs_doze_mode_read,
 			sysfs_doze_mode_write);
-
-static DEVICE_ATTR(fod_ui, 0444,
-			sysfs_fod_ui_read,
-			NULL);
 
 static DEVICE_ATTR(hbm, 0644,
 			sysfs_hbm_read,
