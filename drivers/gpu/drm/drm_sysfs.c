@@ -5,6 +5,7 @@
  *               does not allow adding attributes.
  *
  * Copyright (c) 2004 Jon Smirl <jonsmirl@gmail.com>
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (c) 2003-2004 Greg Kroah-Hartman <greg@kroah.com>
  * Copyright (c) 2003-2004 IBM Corp.
  *
@@ -25,6 +26,7 @@
 
 #define to_drm_minor(d) dev_get_drvdata(d)
 #define to_drm_connector(d) dev_get_drvdata(d)
+//#define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 
 /**
  * DOC: overview
@@ -331,7 +333,32 @@ static ssize_t disp_param_store(struct device *device,
 	return count;
 }
 
+ssize_t drm_bridge_disp_param_get(struct drm_bridge *bridge, char *pbuf);
+static ssize_t disp_param_show(struct device *device,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	ssize_t ret = 0;
+	struct drm_connector *connector = NULL;
+	struct drm_encoder *encoder = NULL;
+	struct drm_bridge *bridge = NULL;
 
+	connector = to_drm_connector(device);
+	if (!connector)
+		return ret;
+
+	encoder = connector->encoder;
+	if (!encoder)
+		return ret;
+
+	bridge = encoder->bridge;
+	if (!bridge)
+		return ret;
+
+	ret = drm_bridge_disp_param_get(bridge, buf);
+
+	return ret;
+}
 
 extern ssize_t get_fod_ui_status(struct drm_connector *connector);
 static ssize_t fod_ui_ready_show(struct device *device,
@@ -389,17 +416,100 @@ static ssize_t dim_layer_enable_show(struct device *device,
 	return snprintf(buf, PAGE_SIZE, fod_dimlayer_enabled ? "enabled\n" : "disabled\n");
 }
 
-static DEVICE_ATTR_RW(dim_layer_enable);
-static DEVICE_ATTR(dim_alpha, S_IRUGO|S_IWUSR, NULL, xm_fod_dim_layer_alpha_store);
+extern ssize_t smart_fps_value_show(struct device *device,
+			   struct device_attribute *attr,
+			   char *buf);
+
+static ssize_t dynamic_fps_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(dev);
+	return dsi_display_dynamic_fps_read(connector, buf);
+}
+
+static ssize_t mipi_reg_show(struct device *device,
+							  struct device_attribute *attr,
+							  char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	return dsi_display_mipi_reg_read(connector, buf);
+}
+
+static ssize_t mipi_reg_store(struct device *device,
+							  struct device_attribute *attr,
+							  const char *buf, size_t count)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	return dsi_display_mipi_reg_write(connector, (char *)buf, count);;
+}
+
+static ssize_t thermal_hbm_disabled_store(struct device *device,
+			   struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	char *input_copy, *input_dup = NULL;
+	bool thermal_hbm_disabled;
+	int ret;
+
+	input_copy = kstrdup(buf, GFP_KERNEL);
+	if (!input_copy) {
+		DRM_ERROR("can not allocate memory\n");
+		ret = -ENOMEM;
+		goto exit;
+	}
+	input_dup = input_copy;
+	/* removes leading and trailing whitespace from input_copy */
+	input_copy = strim(input_copy);
+	ret = kstrtobool(input_copy, &thermal_hbm_disabled);
+	if (ret) {
+		DRM_ERROR("input buffer conversion failed\n");
+		ret = -EAGAIN;
+		goto exit_free;
+	}
+
+	DRM_INFO("set thermal_hbm_disabled %d\n", thermal_hbm_disabled);
+	ret = dsi_display_set_thermal_hbm_disabled(connector, thermal_hbm_disabled);
+
+exit_free:
+	kfree(input_dup);
+exit:
+	return ret ? ret : count;
+}
+
+static ssize_t thermal_hbm_disabled_show(struct device *device,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	bool thermal_hbm_disabled;
+
+	dsi_display_get_thermal_hbm_disabled(connector, &thermal_hbm_disabled);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", thermal_hbm_disabled);
+}
+
+extern ssize_t wp_info_show(struct device *device,
+				struct device_attribute *attr,
+				char *buf);
+
+static DEVICE_ATTR_RW(thermal_hbm_disabled);
 static DEVICE_ATTR_RW(status);
 static DEVICE_ATTR_RO(enabled);
 static DEVICE_ATTR_RO(dpms);
 static DEVICE_ATTR_RO(modes);
 static DEVICE_ATTR_RO(panel_info);
-static DEVICE_ATTR_WO(disp_param);
+static DEVICE_ATTR_RW(disp_param);
 static DEVICE_ATTR_RO(doze_brightness);
+static DEVICE_ATTR_RW(dim_layer_enable);
+static DEVICE_ATTR(dim_alpha, S_IRUGO|S_IWUSR, NULL, xm_fod_dim_layer_alpha_store);
 static DEVICE_ATTR_RW(doze_backlight);
 static DEVICE_ATTR_RO(fod_ui_ready);
+static DEVICE_ATTR_RO(smart_fps_value);
+static DEVICE_ATTR_RO(dynamic_fps);
+static DEVICE_ATTR_RW(mipi_reg);
+static DEVICE_ATTR_RO(wp_info);
+
 
 static struct attribute *connector_dev_attrs[] = {
 	&dev_attr_status.attr,
@@ -409,10 +519,15 @@ static struct attribute *connector_dev_attrs[] = {
 	&dev_attr_panel_info.attr,
 	&dev_attr_disp_param.attr,
 	&dev_attr_doze_brightness.attr,
+	&dev_attr_dim_layer_enable.attr,
 	&dev_attr_doze_backlight.attr,
 	&dev_attr_dim_alpha.attr,
 	&dev_attr_fod_ui_ready.attr,
-	&dev_attr_dim_layer_enable.attr,
+	&dev_attr_smart_fps_value.attr,
+	&dev_attr_dynamic_fps.attr,
+	&dev_attr_mipi_reg.attr,
+	&dev_attr_thermal_hbm_disabled.attr,
+	&dev_attr_wp_info.attr,
 	NULL
 };
 

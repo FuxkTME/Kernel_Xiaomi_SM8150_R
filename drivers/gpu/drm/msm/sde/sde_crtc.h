@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -227,6 +228,7 @@ struct sde_crtc_fps_info {
  * @rp_lock       : serialization lock for resource pool
  * @rp_head       : list of active resource pool
  * @plane_mask_old: keeps track of the planes used in the previous commit
+ * @frame_trigger_mode: frame trigger mode
  */
 struct sde_crtc {
 	struct drm_crtc base;
@@ -305,6 +307,7 @@ struct sde_crtc {
 
 	/* blob for histogram data */
 	struct drm_property_blob *hist_blob;
+	enum frame_trigger_mode_type frame_trigger_mode;
 	bool is_primary_sde_crtc;
 };
 
@@ -544,6 +547,30 @@ static inline int sde_crtc_frame_pending(struct drm_crtc *crtc)
 
 	sde_crtc = to_sde_crtc(crtc);
 	return atomic_read(&sde_crtc->frame_pending);
+}
+
+/**
+ * sde_crtc_reset_hw - attempt hardware reset on errors
+ * @crtc: Pointer to DRM crtc instance
+ * @old_state: Pointer to crtc state for previous commit
+ * @recovery_events: Whether or not recovery events are enabled
+ * Returns: Zero if current commit should still be attempted
+ */
+int sde_crtc_reset_hw(struct drm_crtc *crtc, struct drm_crtc_state *old_state,
+	bool recovery_events);
+
+/**
+ * sde_crtc_request_frame_reset - requests for next frame reset
+ * @crtc: Pointer to drm crtc object
+ */
+static inline int sde_crtc_request_frame_reset(struct drm_crtc *crtc)
+{
+	struct sde_crtc *sde_crtc = to_sde_crtc(crtc);
+
+	if (sde_crtc->frame_trigger_mode == FRAME_DONE_WAIT_POSTED_START)
+		sde_crtc_reset_hw(crtc, crtc->state, false);
+
+	return 0;
 }
 
 /**
@@ -870,6 +897,12 @@ int sde_crtc_calc_vpadding_param(struct drm_crtc_state *state,
  */
 int sde_crtc_get_num_datapath(struct drm_crtc *crtc,
 		struct drm_connector *connector);
+
+/**
+ * _sde_crtc_clear_dim_layers_v1 - clear all dim layer settings
+ * @cstate:      Pointer to drm crtc state
+ */
+void _sde_crtc_clear_dim_layers_v1(struct drm_crtc_state *state);
 uint32_t sde_crtc_get_mi_fod_sync_info(struct sde_crtc_state *cstate);
 
 #endif /* _SDE_CRTC_H_ */
