@@ -821,7 +821,7 @@ error:
 	return rc;
 }
 
-<<<int dsi_panel_set_doze_status(struct dsi_panel *panel, bool status) {
+int dsi_panel_set_doze_status(struct dsi_panel *panel, bool status) {
 	if (panel->doze_enabled == status)
 		return 0;
 
