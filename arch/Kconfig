@@ -598,8 +598,8 @@ config THIN_ARCHIVES
 
 choice
 	prompt "Kernel linker"
-	default LD_BFD if !LTO_CLANG
-	default LD_GOLD if LTO_CLANG
+	default LD_LLD if !LTO_CLANG
+	default LD_LLD if LTO_CLANG
 	help
 	  This selects the linker that will be used to link the kernel and
 	  its composite objects.
@@ -622,7 +622,6 @@ config LD_GOLD
 
 config LD_LLD
 	bool "lld"
-	default y
 	help
 	  Use the alternative lld linker from LLVM.
 
