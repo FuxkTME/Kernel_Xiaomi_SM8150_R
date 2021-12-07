@@ -2305,20 +2305,11 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 			vote(chg->chg_disable_votable, FORCE_RECHARGE_VOTER,
 					false, 0);
 		break;
-<<<<<<< HEAD
-=======
-	case POWER_SUPPLY_PROP_LIQUID_DETECTION:
-		chg->lpd_status = val->intval;
-		power_supply_changed(chg->batt_psy);
-		break;
-	case POWER_SUPPLY_PROP_DYNAMIC_FV_ENABLED:
-		chg->dynamic_fv_enabled = !!val->intval;
-		break;
 	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
 		rc = smblib_set_prop_battery_charging_enabled(chg, val);
 		break;
->>>>>>> 7849729f6c48 (power: smb5: Add battery idle support for ACC)
-	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
+	case
+		POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		chg->fcc_stepper_enable = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
@@ -2376,17 +2367,12 @@ static int smb5_batt_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
 	case POWER_SUPPLY_PROP_DIE_HEALTH:
-<<<<<<< HEAD
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
 	case POWER_SUPPLY_PROP_BATTERY_CHARGING_LIMITED:
 	case POWER_SUPPLY_PROP_SLOWLY_CHARGING:
-=======
-	case POWER_SUPPLY_PROP_DC_THERMAL_LEVELS:
-	case POWER_SUPPLY_PROP_LIQUID_DETECTION:
 	case POWER_SUPPLY_PROP_DYNAMIC_FV_ENABLED:
  	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
->>>>>>> 7849729f6c48 (power: smb5: Add battery idle support for ACC)
 		return 1;
 	default:
 		break;
