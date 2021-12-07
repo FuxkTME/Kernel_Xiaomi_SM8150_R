@@ -23,8 +23,6 @@
 
 #include <linux/msm_drm_notify.h>
 
-#include <linux/msm_drm_notify.h>
-
 #include "msm_drv.h"
 #include "sde_connector.h"
 #include "msm_mmu.h"
@@ -1348,13 +1346,24 @@ int dsi_display_set_power(struct drm_connector *connector,
 		return -EINVAL;
 	}
 
+
+        if (!connector || !connector->dev) {
+                pr_err("invalid connector/dev\n");
+                return -EINVAL;
+        } else {
+                dev = connector->dev;
+                event = dev->doze_state;
+        }
+
 	notify_data.data = &event;
 
 	switch (power_mode) {
 	case SDE_MODE_DPMS_LP1:
 		msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK, &notify_data);
 		rc = dsi_panel_set_lp1(display->panel);
-		msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK, &notify_data);
+		if (!rc)
+			dsi_panel_set_doze_backlight(display);
+				msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK, &notify_data);
 		break;
 	case SDE_MODE_DPMS_LP2:
 		msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK, &notify_data);
@@ -4872,10 +4881,10 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 
 		display_for_each_ctrl(i, display) {
 			ctrl = &display->ctrl[i];
-			rc = dsi_ctrl_update_host_config(ctrl->ctrl,
-				&display->config, mode, mode->dsi_mode_flags,
+			rc = dsi_ctrl_update_host_config(ctrl->ctrl, &display->config,
+				mode, mode->dsi_mode_flags,
 				display->dsi_clk_handle);
-			if (rc) {
+		if (rc) {
 				pr_err("failed to update ctrl config\n");
 				goto error;
 			}
@@ -4917,7 +4926,7 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 		}
 	}
 
-	display_for_each_ctrl(i, display) {
+display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		rc = dsi_ctrl_update_host_config(ctrl->ctrl, &display->config,
 				mode, mode->dsi_mode_flags,
@@ -7214,8 +7223,9 @@ int dsi_display_set_mode(struct dsi_display *display,
 
 	pr_info("mdp_transfer_time_us=%d us\n",
 			adj_mode.priv_info->mdp_transfer_time_us);
-	pr_info("hactive= %d, vactive= %d, fps=%d", timing.h_active,
-			timing.v_active, timing.refresh_rate);
+	pr_info("hactive= %d,vactive= %d,fps=%d\n",
+			timing.h_active, timing.v_active,
+			timing.refresh_rate);
 
 	if (display->panel->cur_mode->timing.refresh_rate != timing.refresh_rate) {
 		if (display->drm_conn && display->drm_conn->kdev)

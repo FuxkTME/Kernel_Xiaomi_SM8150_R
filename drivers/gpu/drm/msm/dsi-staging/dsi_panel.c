@@ -55,6 +55,8 @@
 
 #define DSI_PANEL_DEFAULT_LABEL  "Default dsi panel"
 
+#define DEFAULT_MDP_TRANSFER_TIME 14000
+
 #define DEFAULT_PANEL_JITTER_NUMERATOR		2
 #define DEFAULT_PANEL_JITTER_DENOMINATOR	1
 #define DEFAULT_PANEL_JITTER_ARRAY_SIZE		2
@@ -2841,6 +2843,12 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 		panel->bl_config.type = DSI_BACKLIGHT_UNKNOWN;
 	}
 
+	panel->bl_config.dcs_type_ss_ea = utils->read_bool(utils->data,
+								"qcom,mdss-dsi-bl-dcs-type-ss-ea");
+
+	panel->bl_config.dcs_type_ss_eb = utils->read_bool(utils->data,
+								"qcom,mdss-dsi-bl-dcs-type-ss-eb");
+
 	panel->bl_config.dcs_type_ss = utils->read_bool(utils->data,
 							"qcom,mdss-dsi-bl-dcs-type-ss");
 
@@ -3135,6 +3143,9 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 	u32 len, i;
 	int rc = 0;
 	struct dsi_display_mode_priv_info *priv_info;
+	u64 h_period, v_period;
+	u64 refresh_rate = TICKS_IN_MICRO_SECOND;
+	struct dsi_mode_info *timing = NULL;
 	u64 pixel_clk_khz;
 
 	if (!mode || !mode->priv_info)
@@ -3158,18 +3169,21 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 		priv_info->phy_timing_len = len;
 	};
 
-	if (panel_mode == DSI_OP_VIDEO_MODE) {
-		/*
-		 *  For command mode we update the pclk as part of
-		 *  function dsi_panel_calc_dsi_transfer_time( )
-		 *  as we set it based on dsi clock or mdp transfer time.
-		 */
-		pixel_clk_khz = (DSI_H_TOTAL_DSC(&mode->timing) *
-				DSI_V_TOTAL(&mode->timing) *
-				mode->timing.refresh_rate);
-		do_div(pixel_clk_khz, 1000);
-		mode->pixel_clk_khz = pixel_clk_khz;
+	timing = &mode->timing;
+
+	if (panel_mode == DSI_OP_CMD_MODE) {
+		h_period = DSI_H_ACTIVE_DSC(timing);
+		v_period = timing->v_active;
+		do_div(refresh_rate, priv_info->mdp_transfer_time_us);
+	} else {
+		h_period = DSI_H_TOTAL_DSC(timing);
+		v_period = DSI_V_TOTAL(timing);
+		refresh_rate = timing->refresh_rate;
 	}
+
+	pixel_clk_khz = h_period * v_period * refresh_rate;
+	do_div(pixel_clk_khz, 1000);
+	mode->pixel_clk_khz = pixel_clk_khz;
 
 	return rc;
 }
@@ -4124,6 +4138,17 @@ static int dsi_panel_parse_mi_config(struct dsi_panel *panel,
 		pr_info("oled panel video mode disabled..\n");
 	}
 
+	rc = of_property_read_u32(of_node,
+		"mi,mdss-dsi-doze-hbm-brightness-value", &panel->doze_hbm_brightness);
+	if (rc || panel->doze_hbm_brightness <= 0) {
+	pr_err("can't get doze hbm brightness\n");
+	}
+
+	rc = of_property_read_u32(of_node,
+		"mi,mdss-dsi-doze-lbm-brightness-value", &panel->doze_lbm_brightness);
+	if (rc || panel->doze_lbm_brightness <= 0) {
+		pr_err("can't get doze lbm brightness\n");
+	}
 
  	rc = of_property_read_u32(of_node,
 			"qcom,mdss-dsi-panel-dc-threshold", &panel->dc_threshold);
@@ -5866,7 +5891,23 @@ int panel_disp_param_send_lock(struct dsi_panel *panel, int param)
 		break;
 	case DISPPARAM_FOD_BACKLIGHT:
 		pr_info("FOD backlight");
-		if (panel->bl_config.dcs_type_ss) {
+		if (panel->bl_config.dcs_type_ss_ea) {
+			if (panel->bl_config.xiaomi_f4_36_flag) {
+				pr_info("FOD f4_36\n");
+				if (fod_backlight == 0x690)
+					fod_backlight = 1700;
+				else if (fod_backlight == 0x7FF)
+					fod_backlight = 2047;
+			} else if (panel->bl_config.xiaomi_f4_41_flag) {
+				pr_info("FOD f4_41\n");
+				if (fod_backlight == 0x690)
+					fod_backlight = 1550;
+				else if (fod_backlight == 0x7FF)
+					fod_backlight = 2047;
+			} else {
+				pr_info("FOD ea\n");
+			}
+		} else if (panel->bl_config.dcs_type_ss) {
 			pr_info("FOD ea8076\n");
 			if (fod_backlight == 0x690)
 				fod_backlight = 4090;
