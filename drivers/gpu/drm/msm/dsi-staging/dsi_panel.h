@@ -205,6 +205,12 @@ struct dsi_read_config {
 	u8 rbuf[64];
 };
 
+#define BRIGHTNESS_ALPHA_PAIR_LEN 2
+struct brightness_alpha_pair {
+	u32 brightness;
+	u32 alpha;
+};
+
 struct dsi_panel {
 	const char *name;
 	const char *type;
@@ -261,7 +267,9 @@ struct dsi_panel {
 
 	bool doze_enabled;
 	enum dsi_doze_mode_type doze_mode;
-
+    
+    struct brightness_alpha_pair *fod_dim_lut;
+	u32 fod_dim_lut_count;
 	int hbm_mode;
 	
 	u32 panel_on_dimming_delay;
@@ -473,6 +481,8 @@ int dsi_panel_set_doze_status(struct dsi_panel *panel, bool status);
 int dsi_panel_set_doze_mode(struct dsi_panel *panel, enum dsi_doze_mode_type mode);
 
 int dsi_panel_set_fod_hbm(struct dsi_panel *panel, bool status);
+
+u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel);
 
 int dsi_panel_apply_hbm_mode(struct dsi_panel *panel);
 
