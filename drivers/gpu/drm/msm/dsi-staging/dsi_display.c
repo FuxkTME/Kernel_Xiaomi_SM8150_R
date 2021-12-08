@@ -5494,6 +5494,23 @@ error:
 	return ret == 0 ? count : ret;
 }
 
+static ssize_t sysfs_fod_ui_read(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct dsi_display *display;
+	bool status;
+
+	display = dev_get_drvdata(dev);
+	if (!display) {
+		pr_err("Invalid display\n");
+		return -EINVAL;
+	}
+
+	status = atomic_read(&display->fod_ui);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", status);
+}
+
 static DEVICE_ATTR(doze_status, 0644,
 			sysfs_doze_status_read,
 			sysfs_doze_status_write);
@@ -5506,10 +5523,15 @@ static DEVICE_ATTR(hbm, 0644,
 			sysfs_hbm_read,
 			sysfs_hbm_write);
 
+static DEVICE_ATTR(fod_ui, 0444,
+			sysfs_fod_ui_read,
+			NULL);
+			
 static struct attribute *display_fs_attrs[] = {
 	&dev_attr_doze_status.attr,
 	&dev_attr_doze_mode.attr,
 	&dev_attr_hbm.attr,
+	&dev_attr_fod_ui.attr,
 	NULL,
 };
 static struct attribute_group display_fs_attrs_group = {
@@ -5539,6 +5561,13 @@ static int dsi_display_sysfs_deinit(struct dsi_display *display)
 
 	return 0;
 
+}
+
+void dsi_display_set_fod_ui(struct dsi_display *display, bool status)
+{
+	struct device *dev = &display->pdev->dev;
+	atomic_set(&display->fod_ui, status);
+	sysfs_notify(&dev->kobj, NULL, "fod_ui");
 }
 
 /**
@@ -5614,6 +5643,7 @@ static int dsi_display_bind(struct device *dev,
 	}
 
 	atomic_set(&display->clkrate_change_pending, 0);
+	atomic_set(&display->fod_ui, false);
 	display->cached_clk_rate = 0;
 
 	rc = dsi_display_sysfs_init(display);
