@@ -3215,7 +3215,7 @@ struct workqueue_attrs *alloc_workqueue_attrs(gfp_t gfp_mask)
 	if (!alloc_cpumask_var(&attrs->cpumask, gfp_mask))
 		goto fail;
 
-	atomic_set(attrs->cpumask, cpu_possible_mask);
+	cpumask_copy(attrs->cpumask, cpu_possible_mask);
 	return attrs;
 fail:
 	free_workqueue_attrs(attrs);
@@ -3226,7 +3226,7 @@ static void copy_workqueue_attrs(struct workqueue_attrs *to,
 				 const struct workqueue_attrs *from)
 {
 	to->nice = from->nice;
-	atomic_set(to->cpumask, from->cpumask);
+	cpumask_copy(to->cpumask, from->cpumask);
 	/*
 	 * Unlike hash and equality test, this function doesn't ignore
 	 * ->no_numa as it is used for both pool and wq attrs.  Instead,
@@ -3669,7 +3669,7 @@ static bool wq_calc_node_cpumask(const struct workqueue_attrs *attrs, int node,
 	return !cpumask_equal(cpumask, attrs->cpumask);
 
 use_dfl:
-	atomic_set(cpumask, attrs->cpumask);
+	cpumask_copy(cpumask, attrs->cpumask);
 	return false;
 }
 
@@ -3743,7 +3743,7 @@ apply_wqattrs_prepare(struct workqueue_struct *wq,
 	copy_workqueue_attrs(new_attrs, attrs);
 	cpumask_and(new_attrs->cpumask, new_attrs->cpumask, wq_unbound_cpumask);
 	if (unlikely(cpumask_empty(new_attrs->cpumask)))
-		atomic_set(new_attrs->cpumask, wq_unbound_cpumask);
+		cpumask_copy(new_attrs->cpumask, wq_unbound_cpumask);
 
 	/*
 	 * We may create multiple pwqs with differing cpumasks.  Make a
@@ -5089,15 +5089,15 @@ int workqueue_set_unbound_cpumask(cpumask_var_t cpumask)
 		apply_wqattrs_lock();
 
 		/* save the old wq_unbound_cpumask. */
-		atomic_set(saved_cpumask, wq_unbound_cpumask);
+		cpumask_copy(saved_cpumask, wq_unbound_cpumask);
 
 		/* update wq_unbound_cpumask at first and apply it to wqs. */
-		atomic_set(wq_unbound_cpumask, cpumask);
+		cpumask_copy(wq_unbound_cpumask, cpumask);
 		ret = workqueue_apply_unbound_cpumask();
 
 		/* restore the wq_unbound_cpumask when failed. */
 		if (ret < 0)
-			atomic_set(wq_unbound_cpumask, saved_cpumask);
+			cpumask_copy(wq_unbound_cpumask, saved_cpumask);
 
 		apply_wqattrs_unlock();
 	}
@@ -5690,8 +5690,8 @@ int __init workqueue_init_early(void)
 	WARN_ON(__alignof__(struct pool_workqueue) < __alignof__(long long));
 
 	BUG_ON(!alloc_cpumask_var(&wq_unbound_cpumask, GFP_KERNEL));
-  cpumask_andnot(wq_unbound_cpumask, cpu_possible_mask, cpu_isolated_map);
-	atomic_set(wq_unbound_cpumask, cpu_lp_mask);
+	cpumask_andnot(wq_unbound_cpumask, cpu_possible_mask, cpu_isolated_map);
+	cpumask_copy(wq_unbound_cpumask, cpu_lp_mask);
 
 	pwq_cache = KMEM_CACHE(pool_workqueue, SLAB_PANIC);
 
@@ -5703,7 +5703,7 @@ int __init workqueue_init_early(void)
 		for_each_cpu_worker_pool(pool, cpu) {
 			BUG_ON(init_worker_pool(pool));
 			pool->cpu = cpu;
-			atomic_set(pool->attrs->cpumask, cpumask_of(cpu));
+			cpumask_copy(pool->attrs->cpumask, cpumask_of(cpu));
 			pool->attrs->nice = std_nice[i++];
 			pool->node = cpu_to_node(cpu);
 

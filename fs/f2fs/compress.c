@@ -338,36 +338,32 @@ static const struct f2fs_compress_ops f2fs_lz4_ops = {
 #ifdef CONFIG_F2FS_FS_ZSTD
 #define F2FS_ZSTD_DEFAULT_CLEVEL	1
 
-static int zstd_init_compress_ctx(struct compress_ctx *cc)
+static int zstd_init_decompress_ctx(struct decompress_io_ctx *dic)
 {
-	zstd_parameters params;
-	zstd_cstream *stream;
+	zstd_dstream *stream;
 	void *workspace;
 	unsigned int workspace_size;
-	unsigned char level = F2FS_I(cc->inode)->i_compress_flag >>
-						COMPRESS_LEVEL_OFFSET;
 
-	params = zstd_get_params(F2FS_ZSTD_DEFAULT_CLEVEL, cc->rlen);
-	workspace_size = zstd_cstream_workspace_bound(&params.cParams);
+	workspace_size = zstd_dstream_workspace_bound(MAX_COMPRESS_WINDOW_SIZE);
 
-	workspace = f2fs_kvmalloc(F2FS_I_SB(cc->inode),
+	workspace = f2fs_kvmalloc(F2FS_I_SB(dic->inode),
 					workspace_size, GFP_NOFS);
 	if (!workspace)
 		return -ENOMEM;
 
-	stream = zstd_init_cstream(&params, 0, workspace, workspace_size);
+	stream = zstd_init_dstream(MAX_COMPRESS_WINDOW_SIZE,
+					workspace, workspace_size);
 	if (!stream) {
-		printk_ratelimited("%sF2FS-fs (%s): %s zstd_init_cstream failed\n",
-				KERN_ERR, F2FS_I_SB(cc->inode)->sb->s_id,
+		printk_ratelimited("%sF2FS-fs (%s): %s zstd_init_dstream failed\n",
+				KERN_ERR, F2FS_I_SB(dic->inode)->sb->s_id,
 				__func__);
 		kvfree(workspace);
 		return -EIO;
 	}
 
-	cc->private = workspace;
-	cc->private2 = stream;
+	dic->private = workspace;
+	dic->private2 = stream;
 
-	cc->clen = cc->rlen - PAGE_SIZE - COMPRESS_HEADER_SIZE;
 	return 0;
 }
 
@@ -422,42 +418,34 @@ static int zstd_compress_pages(struct compress_ctx *cc)
 	return 0;
 }
 
-static int zstd_init_decompress_ctx(struct decompress_io_ctx *dic)
+static int zstd_init_compress_ctx(struct compress_ctx *cc)
 {
-	zstd_dstream *stream;
+	zstd_parameters params;
+	zstd_cstream *stream;
 	void *workspace;
 	unsigned int workspace_size;
-	unsigned int max_window_size =
-			MAX_COMPRESS_WINDOW_SIZE(dic->log_cluster_size);
 
-<<<<<<< HEAD
-	workspace_size = ZSTD_DStreamWorkspaceBound(max_window_size);
-=======
-	workspace_size = zstd_dstream_workspace_bound(MAX_COMPRESS_WINDOW_SIZE);
->>>>>>> de04a4f3523c (BACKPORT: lib: zstd: Add kernel-specific API)
+	params = zstd_get_params(F2FS_ZSTD_DEFAULT_CLEVEL, cc->rlen);
+	workspace_size = zstd_cstream_workspace_bound(&params.cParams);
 
-	workspace = f2fs_kvmalloc(F2FS_I_SB(dic->inode),
+	workspace = f2fs_kvmalloc(F2FS_I_SB(cc->inode),
 					workspace_size, GFP_NOFS);
 	if (!workspace)
 		return -ENOMEM;
 
-<<<<<<< HEAD
-	stream = ZSTD_initDStream(max_window_size, workspace, workspace_size);
-=======
-	stream = zstd_init_dstream(MAX_COMPRESS_WINDOW_SIZE,
-					workspace, workspace_size);
->>>>>>> de04a4f3523c (BACKPORT: lib: zstd: Add kernel-specific API)
+	stream = zstd_init_cstream(&params, 0, workspace, workspace_size);
 	if (!stream) {
-		printk_ratelimited("%sF2FS-fs (%s): %s zstd_init_dstream failed\n",
-				KERN_ERR, F2FS_I_SB(dic->inode)->sb->s_id,
+		printk_ratelimited("%sF2FS-fs (%s): %s zstd_init_cstream failed\n",
+				KERN_ERR, F2FS_I_SB(cc->inode)->sb->s_id,
 				__func__);
 		kvfree(workspace);
 		return -EIO;
 	}
 
-	dic->private = workspace;
-	dic->private2 = stream;
+	cc->private = workspace;
+	cc->private2 = stream;
 
+	cc->clen = cc->rlen - PAGE_SIZE - COMPRESS_HEADER_SIZE;
 	return 0;
 }
 
