@@ -131,4 +131,5 @@ kernel/configs/android-*.cfg
 #
 Android.bp
 /out_raphael
-/out_cepheus 
+/out_cepheus
+/out_crux
