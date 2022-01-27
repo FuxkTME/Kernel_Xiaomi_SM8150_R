@@ -624,6 +624,14 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 		bl_lvl = (((bl_lvl & 0xff) << 8) | (bl_lvl >> 8));
 
 	rc = mipi_dsi_dcs_set_display_brightness(dsi, bl_lvl);
+
+	if (panel->bl_config.dcs_type_ss || panel->bl_config.dcs_type_ss_ea || panel->bl_config.dcs_type_ss_eb)
+		rc = mipi_dsi_dcs_set_display_brightness_ss(dsi, bl_temp);
+
+	/* For the f4_41 panel, we need to switch the DEMURA_LEVEL according to the value of the 51 register. */
+	if (panel->bl_config.xiaomi_f4_41_flag)
+		rc = dsi_panel_update_backlight_demura_level(panel, bl_temp);
+
 	if (rc < 0)
 		pr_err("failed to update dcs backlight:%d\n", bl_lvl);
 
@@ -2271,6 +2279,20 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 			 panel->name, bl_type);
 		panel->bl_config.type = DSI_BACKLIGHT_UNKNOWN;
 	}
+
+	panel->bl_config.dcs_type_ss = utils->read_bool(utils->data,
+							"qcom,mdss-dsi-bl-dcs-type-ss");
+	panel->bl_config.dcs_type_ss_ea = utils->read_bool(utils->data,
+								"qcom,mdss-dsi-bl-dcs-type-ss-ea");
+
+	panel->bl_config.dcs_type_ss_eb = utils->read_bool(utils->data,
+								"qcom,mdss-dsi-bl-dcs-type-ss-eb");
+
+	panel->bl_config.xiaomi_f4_36_flag = utils->read_bool(utils->data,
+								"qcom,mdss-dsi-bl-xiaomi-f4-36-flag");
+
+	panel->bl_config.xiaomi_f4_41_flag = utils->read_bool(utils->data,
+								"qcom,mdss-dsi-bl-xiaomi-f4-41-flag");
 
 	data = utils->get_property(utils->data, "qcom,bl-update-flag", NULL);
 	if (!data) {
@@ -3924,19 +3946,45 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 	if (!panel->panel_initialized)
 		goto exit;
 
-	/**
-	 * Consider about LP1->LP2->NOLP.
+        /**
+         * Consider about LP1->LP2->NOLP.
+         */
+        if (dsi_panel_is_type_oled(panel) &&
+            (panel->power_mode == SDE_MODE_DPMS_LP1 ||
+                panel->power_mode == SDE_MODE_DPMS_LP2))
+                dsi_pwr_panel_regulator_mode_set(&panel->power_info,
+                        "ibb", REGULATOR_MODE_NORMAL);
+
+	/*
+	 * Setting backlight in nolp command
 	 */
-	if (dsi_panel_is_type_oled(panel) &&
-	    (panel->power_mode == SDE_MODE_DPMS_LP1 ||
-		panel->power_mode == SDE_MODE_DPMS_LP2))
-		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
-			"ibb", REGULATOR_MODE_NORMAL);
-	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
-	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
-		       panel->name, rc);
-exit:
+	if (panel->nolp_command_set_backlight_enabled){
+		cmds = priv_info->cmd_sets[DSI_CMD_SET_NOLP].cmds;
+		if (cmds) {
+			tx_buf = (u8 *)cmds[0].msg.tx_buf;
+			tx_buf[1] = (panel->last_bl_lvl >> 8) & 0x07;
+			tx_buf[2] = panel->last_bl_lvl & 0xff;
+		}
+	}
+
+	if (!panel->oled_panel_video_mode && !panel->fod_hbm_enabled && !panel->fod_dimlayer_hbm_enabled) {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
+		if (rc)
+			pr_err("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
+			       panel->name, rc);
+
+		panel->skip_dimmingon = STATE_NONE;
+	} else
+		pr_info("%s skip\n", __func__);
+
+	if (!panel->oled_panel_video_mode)
+		panel->in_aod = false;
+
+	if (!panel->oled_panel_video_mode &&
+		(panel->bl_config.dcs_type_ss || panel->bl_config.dcs_type_ss_eb || panel->bl_config.xiaomi_f4_36_flag ||panel->bl_config.xiaomi_f4_41_flag)) {
+		rc = dsi_panel_set_backlight(panel, panel->last_bl_lvl);
+	}
+
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4131,6 +4179,767 @@ int dsi_panel_send_roi_dcs(struct dsi_panel *panel, int ctrl_idx,
 	dsi_panel_dealloc_cmd_packets(set);
 
 	return rc;
+}
+
+static void handle_dsi_read_data(struct dsi_panel *panel, struct dsi_read_config *read_config)
+{
+	int i = 0;
+	int param_nb = 0, write_len = 0;
+	u32 read_cnt = 0, bit_valide = 0;
+
+	u8 *pRead_data = panel->panel_read_data;
+	read_cnt = read_config->cmds_rlen;
+	bit_valide = read_config->valid_bits;
+
+	for (i = 0; i < read_cnt; i++) {
+		if ((bit_valide & 0x1) && ((pRead_data + 8) < (panel->panel_read_data + BUF_LEN_MAX))) {
+			write_len = scnprintf(pRead_data, 8, "p%d=%d", param_nb, read_config->rbuf[i]);
+			pRead_data += write_len;
+			param_nb ++;
+		}
+		bit_valide = bit_valide >> 1;
+	}
+	pr_info("read %s from panel\n", panel->panel_read_data);
+
+	return;
+}
+
+extern struct msm_display_info *g_msm_display_info;
+extern bool g_idleflag;
+int panel_disp_param_send_lock(struct dsi_panel *panel, int param)
+{
+	int rc = 0;
+	uint32_t temp = 0;
+	u32 fod_backlight = 0;
+	bool is_thermal_call = false;
+	struct dsi_panel_cmd_set cmd_sets = {0};
+	struct dsi_cmd_desc *cmds = NULL;
+	struct dsi_display_mode_priv_info *priv_info;
+	u32 count;
+	u8 *tx_buf;
+
+	mutex_lock(&panel->panel_lock);
+
+	pr_info("[LCD] param_type = 0x%x\n", param);
+
+	if (!panel->panel_initialized
+		&& (param & 0x0F000000) != DISPPARAM_FOD_BACKLIGHT_ON
+		&& (param & 0x0F000000) != DISPPARAM_FOD_BACKLIGHT_OFF) {
+		pr_err("[LCD] panel not ready!\n");
+		mutex_unlock(&panel->panel_lock);
+		return rc;
+	}
+
+	priv_info = panel->cur_mode->priv_info;
+
+	if ((param & 0x00F00000) == 0xD00000) {
+		fod_backlight = (param & 0x01FFF);
+		param = (param & 0x0FF00000);
+	}
+
+	/* set smart fps status */
+	if (param & 0xF0000000) {
+		fm_stat.enabled = param & 0x01;
+		pr_info("[LCD] smart dfps enable = [%d]\n", fm_stat.enabled);
+	}
+
+	temp = param & 0x0000000F;
+	switch (temp) {
+	case DISPPARAM_WARM:
+		pr_info("warm\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_WARM);
+		break;
+	case DISPPARAM_DEFAULT:
+		pr_info("normal\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DEFAULT);
+		break;
+	case DISPPARAM_COLD:
+		pr_info("cold\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_COLD);
+		break;
+	case DISPPARAM_PAPERMODE8:
+		pr_info("paper mode\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_COLD);
+		break;
+	case DISPPARAM_PAPERMODE1:
+		pr_info("paper mode 1\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER1);
+		break;
+	case DISPPARAM_PAPERMODE2:
+		pr_info("paper mode 2\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER2);
+		break;
+	case DISPPARAM_PAPERMODE3:
+		pr_info("paper mode 3\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER3);
+		break;
+	case DISPPARAM_PAPERMODE4:
+		pr_info("paper mode 4\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER4);
+		break;
+	case DISPPARAM_PAPERMODE5:
+		pr_info("paper mode 5\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER5);
+		break;
+	case DISPPARAM_PAPERMODE6:
+		pr_info("paper mode 6\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER6);
+		break;
+	case DISPPARAM_PAPERMODE7:
+		pr_info("paper mode 7\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PAPER7);
+		break;
+	case DISPPARAM_WHITEPOINT_XY:
+		pr_info("read xy coordinate\n");
+
+		cmd_sets.cmds = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_SET_READ_XY_COORDINATE].cmds;
+		if (panel->cur_mode->priv_info->cmd_sets[DSI_CMD_SET_READ_XY_COORDINATE].count)
+			cmd_sets.count = 1;
+		cmd_sets.state = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_SET_READ_XY_COORDINATE].state;
+		rc = dsi_display_write_panel(panel, &cmd_sets);
+		if (rc) {
+			pr_err("[%s][%s] failed to send cmds, rc=%d\n", __func__, panel->name, rc);
+		} else {
+			panel->xy_coordinate_cmds.read_cmd = cmd_sets;
+			panel->xy_coordinate_cmds.read_cmd.cmds = &cmd_sets.cmds[1];
+			rc = dsi_display_read_panel(panel, &panel->xy_coordinate_cmds);
+			if (rc > 0)
+				handle_dsi_read_data(panel, &panel->xy_coordinate_cmds);
+		}
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0x000000F0;
+	switch (temp) {
+	case DISPPARAM_CE_ON:
+		pr_info("ceon\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CEON);
+		break;
+	case DISPPARAM_CE_OFF:
+		pr_info("ceoff\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CEOFF);
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0x00000F00;
+	switch (temp) {
+	case DISPPARAM_CABCUI_ON:
+		pr_info("cabcuion\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CABCUION);
+		break;
+	case DISPPARAM_CABCSTILL_ON:
+		pr_info("cabcstillon\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CABCSTILLON);
+		break;
+	case DISPPARAM_CABCMOVIE_ON:
+		pr_info("cabcmovieon\n");
+		dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CABCMOVIEON);
+		break;
+	case DISPPARAM_CABC_OFF:
+		pr_info("cabcoff\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CABCOFF);
+		break;
+	case DISPPARAM_SKIN_CE_CABCUI_ON:
+		pr_info("skince cabcuion\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_SKINCE_CABCUION);
+		break;
+	case DISPPARAM_SKIN_CE_CABCSTILL_ON:
+		pr_info("skince cabcstillon\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_SKINCE_CABCSTILLON);
+		break;
+	case DISPPARAM_SKIN_CE_CABCMOVIE_ON:
+		pr_info("skince cabcmovieon\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_SKINCE_CABCMOVIEON);
+		break;
+	case DISPPARAM_SKIN_CE_CABC_OFF:
+		pr_info("skince cabcoff\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_SKINCE_CABCOFF);
+		break;
+	case DISPPARAM_DIMMING_OFF:
+		pr_info("dimmingoff\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DIMMINGOFF);
+		break;
+	case DISPPARAM_DIMMING:
+		pr_info("dimmingon\n");
+		if (panel->skip_dimmingon != STATE_DIM_BLOCK) {
+			if (ktime_after(ktime_get(), panel->fod_hbm_off_time)
+				&& ktime_after(ktime_get(), panel->fod_backlight_off_time)) {
+				dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DIMMINGON);
+			} else {
+				pr_info("skip dimmingon due to hbm off\n");
+			}
+		} else {
+			pr_info("skip dimmingon due to hbm on\n");
+		}
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0x0000F000;
+	switch (temp) {
+	case DISPPARAM_ACL_L1:
+		pr_info("acl level 1\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ACL_L1);
+		break;
+	case DISPPARAM_ACL_L2:
+		pr_info("acl level 2\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ACL_L2);
+		break;
+	case DISPPARAM_ACL_L3:
+		pr_info("acl level 3\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ACL_L3);
+		break;
+	case DISPPARAM_ACL_OFF:
+		pr_info("acl off\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ACL_OFF);
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0x000F0000;
+	switch (temp) {
+	case DISPPARAM_LCD_HBM_L1_ON:
+			pr_info("lcd hbm l1 on\n");
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_LCD_HBM_L1_ON);
+			break;
+	case DISPPARAM_LCD_HBM_L2_ON:
+			pr_info("lcd hbm  l2 on\n");
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_LCD_HBM_L2_ON);
+			break;
+	case DISPPARAM_LCD_HBM_OFF:
+		pr_info("lcd hbm off\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_LCD_HBM_OFF);
+		break;
+	case DISPPARAM_HBM_ON:
+		if (param & DISPPARAM_THERMAL_SET)
+			is_thermal_call = true;
+		pr_info("hbm on, thermal_hbm_disabled = %d\n", panel->thermal_hbm_disabled);
+		if (!panel->fod_hbm_enabled && !panel->thermal_hbm_disabled)
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_ON);
+		if (is_thermal_call) {
+			pr_info("thermal clear hbm limit, restore previous hbm on\n");
+		} else {
+			panel->skip_dimmingon = STATE_DIM_BLOCK;
+			panel->hbm_enabled = true;
+		}
+		break;
+	case DISPPARAM_HBM_FOD_ON:
+		pr_info("hbm fod on\n");
+		if (panel->elvss_dimming_check_enable) {
+			rc = dsi_display_write_panel(panel, &panel->hbm_fod_on);
+		} else {
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD_ON);
+		}
+		panel->skip_dimmingon = STATE_DIM_BLOCK;
+		panel->fod_hbm_enabled = true;
+		break;
+	case DISPPARAM_HBM_FOD2NORM:
+		pr_info("hbm fod to normal mode\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD2NORM);
+		break;
+	case DISPPARAM_HBM_FOD_OFF:
+		pr_info("hbm fod off\n");
+		if (panel->f4_51_ctrl_flag) {
+			cmds = priv_info->cmd_sets[DSI_CMD_SET_DISP_HBM_FOD_OFF].cmds;
+			count = priv_info->cmd_sets[DSI_CMD_SET_DISP_HBM_FOD_OFF].count;
+			if (cmds && count >= panel->fod_off_51_index) {
+				tx_buf = (u8 *)cmds[panel->fod_off_51_index].msg.tx_buf;
+				tx_buf[1] = (panel->last_bl_lvl >> 8) & 0x07;
+				tx_buf[2] = panel->last_bl_lvl & 0xff;
+			}
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD_OFF);
+		} else {
+			if (panel->elvss_dimming_check_enable) {
+				rc = dsi_display_write_panel(panel, &panel->hbm_fod_off);
+			} else {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD_OFF);
+			}
+		}
+
+		panel->skip_dimmingon = STATE_DIM_RESTORE;
+		panel->fod_hbm_enabled = false;
+		panel->fod_hbm_off_time = ktime_add_ms(ktime_get(), panel->fod_off_dimming_delay);
+
+		{
+			struct dsi_display *display = NULL;
+			struct mipi_dsi_host *host = panel->host;
+			if (host)
+				display = container_of(host, struct dsi_display, host);
+
+			if (display->drm_dev
+				&& ((display->drm_dev->doze_state == DRM_BLANK_LP1)
+					|| (display->drm_dev->doze_state == DRM_BLANK_LP2))) {
+#if 0
+				if (panel->last_bl_lvl > panel->doze_backlight_threshold) {
+					pr_info("hbm fod off DSI_CMD_SET_DOZE_HBM");
+					rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_HBM);
+					if (rc)
+						pr_err("[%s] failed to send DSI_CMD_SET_DOZE_HBM cmd, rc=%d\n",
+							   panel->name, rc);
+					display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_HBM;
+					panel->in_aod = true;
+					panel->skip_dimmingon = STATE_DIM_BLOCK;
+				} else if (panel->last_bl_lvl <= panel->doze_backlight_threshold && panel->last_bl_lvl > 0) {
+					pr_info("hbm fod off DSI_CMD_SET_DOZE_LBM");
+					rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_LBM);
+					if (rc)
+						pr_err("[%s] failed to send DSI_CMD_SET_DOZE_LBM cmd, rc=%d\n",
+							   panel->name, rc);
+					display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_LBM;
+					panel->in_aod = true;
+					panel->skip_dimmingon = STATE_DIM_BLOCK;
+				} else {
+					pr_info("hbm fod off DOZE_BRIGHTNESS_INVALID");
+					display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_INVALID;
+				}
+#else
+				pr_info("HBM_FOD_OFF DSI_CMD_SET_DOZE_HBM");
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_HBM);
+				if (rc)
+					pr_err("[%s] failed to send DSI_CMD_SET_DOZE_HBM cmd, rc=%d\n",
+						   panel->name, rc);
+				display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_HBM;
+				panel->in_aod = true;
+				panel->skip_dimmingon = STATE_DIM_BLOCK;
+#endif
+			}
+		}
+		break;
+	case DISPPARAM_HBM_OFF:
+		if (param & DISPPARAM_THERMAL_SET)
+			is_thermal_call = true;
+		pr_info("hbm off\n");
+		if (!panel->fod_hbm_enabled) {
+			if (panel->f4_51_ctrl_flag) {
+				cmds = priv_info->cmd_sets[DSI_CMD_SET_DISP_HBM_OFF].cmds;
+				count = priv_info->cmd_sets[DSI_CMD_SET_DISP_HBM_OFF].count;
+				if (cmds && count >= panel->hbm_off_51_index) {
+					tx_buf = (u8 *)cmds[panel->hbm_off_51_index].msg.tx_buf;
+					if (tx_buf && tx_buf[0] == 0x51) {
+						tx_buf[1] = (panel->last_bl_lvl >> 8) & 0x07;
+						tx_buf[2] = panel->last_bl_lvl & 0xff;
+					}else {
+						if (tx_buf)
+							pr_err("tx_buf[0] = 0x%02X, check 0x51 index\n", tx_buf[0]);
+						else
+							pr_err("tx_buf is NULL pointer\n");
+					}
+				}else{
+					pr_err("0x51 index(%d) error\n", panel->hbm_off_51_index);
+				}
+			}
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_OFF);
+			panel->skip_dimmingon = STATE_DIM_RESTORE;
+		}
+		if (is_thermal_call) {
+			pr_info("thermal set hbm limit, hbm off\n");
+		} else {
+			panel->hbm_enabled = false;
+		}
+		break;
+	case DISPPARAM_DC_ON:
+		pr_info("DC on\n");
+		panel->dc_enable = true;
+		if ((panel->bl_config.xiaomi_f4_41_flag && panel->dc_demura_threshold) ||
+				panel->bl_config.xiaomi_f4_36_flag) {
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DC_ON);
+			if (rc)
+				pr_err("[%s] failed to send DSI_CMD_SET_DISP_DC_ON cmd, rc=%d\n",
+						panel->name, rc);
+			else
+				rc = dsi_panel_update_backlight(panel, panel->last_bl_lvl);
+		}
+		break;
+	case DISPPARAM_DC_OFF:
+		pr_info("DC off\n");
+		panel->dc_enable = false;
+		if ((panel->bl_config.xiaomi_f4_41_flag && panel->dc_demura_threshold) ||
+				panel->bl_config.xiaomi_f4_36_flag) {
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DC_OFF);
+			if (rc)
+				pr_err("[%s] failed to send DSI_CMD_SET_DISP_DC_OFF cmd, rc=%d\n",
+						panel->name, rc);
+			else
+				rc = dsi_panel_update_backlight(panel, panel->last_bl_lvl);
+		}
+		break;
+	case DISPPARAM_BC_120HZ:
+		pr_info("zjz BC 120hz\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_BC_120HZ);
+		break;
+	case DISPPARAM_BC_60HZ:
+		pr_info("zjz BC 60hz\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_BC_60HZ);
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0x00F00000;
+	switch (temp) {
+	case DISPPARAM_NORMALMODE1:
+		pr_info("normal mode1\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_NORMAL1);
+		break;
+	case DISPPARAM_P3:
+		pr_info("dci p3 mode\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CRC_DCIP3);
+		break;
+	case DISPPARAM_SRGB:
+		pr_info("sRGB\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_SRGB);
+		break;
+	case DISPPARAM_DOZE_BRIGHTNESS_HBM:
+#ifdef CONFIG_FACTORY_BUILD
+		pr_info("factory doze hbm On\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_HBM);
+		panel->skip_dimmingon = STATE_DIM_BLOCK;
+#else
+		if (panel->in_aod) {
+			pr_info("doze hbm On\n");
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_HBM);
+			panel->skip_dimmingon = STATE_DIM_BLOCK;
+		}
+#endif
+		break;
+	case DISPPARAM_DOZE_BRIGHTNESS_LBM:
+#ifdef CONFIG_FACTORY_BUILD
+		pr_info("factory doze lbm On\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_LBM);
+		panel->skip_dimmingon = STATE_DIM_BLOCK;
+#else
+		if (panel->in_aod) {
+			pr_info("doze lbm On\n");
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_LBM);
+			panel->skip_dimmingon = STATE_DIM_BLOCK;
+		}
+#endif
+		break;
+	case DISPPARAM_DOZE_OFF:
+		pr_info("doze Off\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
+		break;
+	case DISPPARAM_HBM_BACKLIGHT_RESEND:
+		if (panel->bl_config.samsung_prepare_hbm_flag) {
+			u32 dim_backlight;
+
+			if (panel->last_bl_lvl >= panel->bl_config.bl_max_level - 1) {
+				if (panel->backlight_delta == -1)
+					panel->backlight_delta = -2;
+				else
+					panel->backlight_delta = -1;
+			} else {
+				if (panel->backlight_delta == 1)
+					panel->backlight_delta = 2;
+				else
+					panel->backlight_delta = 1;
+			}
+
+			if (panel->fod_backlight_flag) {
+				dim_backlight = panel->fod_target_backlight + panel->backlight_delta;
+			} else {
+				dim_backlight = panel->last_bl_lvl + panel->backlight_delta;
+			}
+			pr_info("backlight repeat:%d\n", dim_backlight);
+			rc = dsi_panel_update_backlight(panel, dim_backlight);
+		}
+		break;
+	case DISPPARAM_FOD_BACKLIGHT:
+		pr_info("FOD backlight");
+		if (panel->bl_config.dcs_type_ss_ea) {
+			if (panel->bl_config.xiaomi_f4_36_flag) {
+				pr_info("FOD f4_36\n");
+				if (fod_backlight == 0x690)
+					fod_backlight = 1700;
+				else if (fod_backlight == 0x7FF)
+					fod_backlight = 2047;
+			} else if (panel->bl_config.xiaomi_f4_41_flag) {
+				pr_info("FOD f4_41\n");
+				if (fod_backlight == 0x690)
+					fod_backlight = 1550;
+				else if (fod_backlight == 0x7FF)
+					fod_backlight = 2047;
+			} else {
+				pr_info("FOD ea\n");
+			}
+		} else if (panel->bl_config.dcs_type_ss_eb) {
+			pr_info("FOD eb\n");
+			if (fod_backlight == 0x690)
+				fod_backlight = 4090;
+			else if (fod_backlight == 0x7FF)
+				fod_backlight = 4090;
+		} else if (panel->bl_config.dcs_type_ss) {
+			pr_info("FOD eb\n");
+			if (fod_backlight == 0x690)
+				fod_backlight = 4090;
+			else if (fod_backlight == 0x7FF)
+				fod_backlight = 4090;
+		}
+		if (fod_backlight == 0x1000) {
+			struct dsi_display *display = NULL;
+			struct mipi_dsi_host *host = panel->host;
+			if (host)
+				display = container_of(host, struct dsi_display, host);
+
+			pr_info("FOD backlight restore last_bl_lvl=%d, doze_state=%d",
+				panel->last_bl_lvl, display->drm_dev->doze_state);
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DIMMINGOFF);
+			rc = dsi_panel_update_backlight(panel, panel->last_bl_lvl);
+
+			if (display->drm_dev
+				&& ((display->drm_dev->doze_state == DRM_BLANK_LP1)
+					|| (display->drm_dev->doze_state == DRM_BLANK_LP2))) {
+#if 0
+				if (panel->last_bl_lvl > panel->doze_backlight_threshold) {
+					pr_info("FOD backlight restore DSI_CMD_SET_DOZE_HBM");
+					rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_HBM);
+					if (rc)
+						pr_err("[%s] failed to send DSI_CMD_SET_DOZE_HBM cmd, rc=%d\n",
+							   panel->name, rc);
+					display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_HBM;
+					panel->in_aod = true;
+					panel->skip_dimmingon = STATE_DIM_BLOCK;
+				} else if (panel->last_bl_lvl <= panel->doze_backlight_threshold && panel->last_bl_lvl > 0) {
+					pr_info("FOD backlight restore DSI_CMD_SET_DOZE_LBM");
+					rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_LBM);
+					if (rc)
+						pr_err("[%s] failed to send DSI_CMD_SET_DOZE_LBM cmd, rc=%d\n",
+							   panel->name, rc);
+					display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_LBM;
+					panel->in_aod = true;
+					panel->skip_dimmingon = STATE_DIM_BLOCK;
+				} else {
+					pr_info("FOD backlight restore DOZE_BRIGHTNESS_INVALID");
+					display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_INVALID;
+				}
+#else
+				pr_info("FOD backlight restore DSI_CMD_SET_DOZE_HBM");
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DOZE_HBM);
+				if (rc)
+					pr_err("[%s] failed to send DSI_CMD_SET_DOZE_HBM cmd, rc=%d\n",
+						   panel->name, rc);
+				display->drm_dev->doze_brightness = DOZE_BRIGHTNESS_HBM;
+				panel->in_aod = true;
+				panel->skip_dimmingon = STATE_DIM_BLOCK;
+#endif
+
+			} else {
+				panel->skip_dimmingon = STATE_DIM_RESTORE;
+				panel->fod_backlight_off_time = ktime_add_ms(ktime_get(), panel->fod_off_dimming_delay);
+			}
+		} else if (fod_backlight >= 0) {
+			pr_info("FOD backlight set fod_backlight %d", fod_backlight);
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DIMMINGOFF);
+			rc = dsi_panel_update_backlight(panel, fod_backlight);
+			panel->fod_target_backlight = fod_backlight;
+			panel->skip_dimmingon = STATE_NONE;
+		}
+		break;
+	case DISPPARAM_CRC_OFF:
+		pr_info("crc off\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_CRC_OFF);
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0x0F000000;
+	switch (temp) {
+	case DISPPARAM_FOD_BACKLIGHT_ON:
+		pr_info("fod_backlight_flag on\n");
+		panel->fod_backlight_flag = true;
+		break;
+	case DISPPARAM_FOD_BACKLIGHT_OFF:
+		pr_info("fod_backlight_flag off\n");
+		panel->fod_backlight_flag = false;
+		break;
+	case DISPPARAM_ELVSS_DIMMING_ON:
+		pr_info("elvss dimming on\n");
+		((u8 *)panel->cur_mode->priv_info->cmd_sets[DSI_CMD_SET_DISP_ELVSS_DIMMING_OFF].cmds[2].msg.tx_buf)[1]
+						= (panel->elvss_dimming_cmds.rbuf[0]);
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ELVSS_DIMMING_OFF);
+		break;
+	case DISPPARAM_ELVSS_DIMMING_OFF:
+		pr_info("elvss dimming off\n");
+		((u8 *)panel->cur_mode->priv_info->cmd_sets[DSI_CMD_SET_DISP_ELVSS_DIMMING_OFF].cmds[2].msg.tx_buf)[1]
+						= (panel->elvss_dimming_cmds.rbuf[0]) & 0x7F;
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ELVSS_DIMMING_OFF);
+		break;
+	case DISPPARAM_FLAT_MODE_ON:
+		pr_info("flat mode on\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_FLAT_MODE_ON);
+		break;
+	case DISPPARAM_FLAT_MODE_OFF:
+		pr_info("flat mode off\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_FLAT_MODE_OFF);
+		break;
+	case DISPPARAM_DEMURA_LEVEL02:
+		pr_info("DEMURA LEVEL 02\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DEMURA_LEVEL02);
+		break;
+	case DISPPARAM_DEMURA_LEVEL08:
+		pr_info("DEMURA LEVEL 08\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DEMURA_LEVEL08);
+		break;
+	case DISPPARAM_DEMURA_LEVEL0D:
+		pr_info("DEMURA LEVEL 0D\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_DEMURA_LEVEL0D);
+		break;
+	case DISPPARAM_IDLE_ON:
+		pr_info("idle on\n");
+		g_idleflag = true;
+		break;
+	case DISPPARAM_IDLE_OFF:
+		pr_info("idle off\n");
+		g_idleflag = false;
+		break;
+	case DISPPARAM_ONE_PLUSE:
+		pr_info("ONE PLUSE\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_ONE_PLUSE);
+		break;
+	case DISPPARAM_FOUR_PLUSE:
+		pr_info("FOUR PLUSE\n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_FOUR_PLUSE);
+		break;
+	default:
+		break;
+	}
+
+	temp = param & 0xF0000000;
+	switch (temp) {
+	case DISPPARAM_DFPS_LEVEL1:
+		pr_info("DFPS:30fps\n");
+		panel->panel_max_frame_rate = false;
+		break;
+	case DISPPARAM_DFPS_LEVEL2:
+		pr_info("DFPS:45fps\n");
+		panel->panel_max_frame_rate = false;
+		break;
+	case DISPPARAM_DFPS_LEVEL3:
+		pr_info("DFPS:60fps\n");
+		panel->panel_max_frame_rate = false;
+		break;
+	case DISPPARAM_DFPS_LEVEL4:
+		pr_info("DFPS:90fps\n");
+		panel->panel_max_frame_rate = false;
+		break;
+	case DISPPARAM_DFPS_LEVEL5:
+		pr_info("DFPS:120fps\n");
+		panel->panel_max_frame_rate = true;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_30HZ:
+		pr_info("QSYNC:30HZ\n");
+		panel->qsync_min_fps = 30;
+		g_msm_display_info->qsync_min_fps = 30;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_40HZ:
+		pr_info("QSYNC:40HZ\n");
+		panel->qsync_min_fps = 40;
+		g_msm_display_info->qsync_min_fps = 40;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_50HZ:
+		pr_info("QSYNC:50HZ\n");
+		panel->qsync_min_fps = 50;
+		g_msm_display_info->qsync_min_fps = 50;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_60HZ:
+		pr_info("QSYNC:60HZ\n");
+		panel->qsync_min_fps = 60;
+		g_msm_display_info->qsync_min_fps = 60;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_70HZ:
+		pr_info("QSYNC:70HZ\n");
+		panel->qsync_min_fps = 70;
+		g_msm_display_info->qsync_min_fps = 70;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_80HZ:
+		pr_info("QSYNC:80HZ\n");
+		panel->qsync_min_fps = 80;
+		g_msm_display_info->qsync_min_fps = 80;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_90HZ:
+		pr_info("QSYNC:90HZ\n");
+		panel->qsync_min_fps = 90;
+		g_msm_display_info->qsync_min_fps = 90;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_100HZ:
+		pr_info("QSYNC:100HZ\n");
+		panel->qsync_min_fps = 100;
+		g_msm_display_info->qsync_min_fps = 100;
+		break;
+	case DISPPARAM_QSYNC_MIN_FPS_110HZ:
+		pr_info("QSYNC:110HZ\n");
+		panel->qsync_min_fps = 110;
+		g_msm_display_info->qsync_min_fps = 110;
+		break;
+	default:
+		break;
+	}
+
+	mutex_unlock(&panel->panel_lock);
+	return rc;
+}
+
+int dsi_panel_set_thermal_hbm_disabled(struct dsi_panel *panel,
+			bool thermal_hbm_disabled)
+{
+	int ret = 0;
+
+	if (!panel) {
+		pr_err("invalid params\n");
+		return -EAGAIN;
+	}
+
+	mutex_lock(&panel->panel_lock);
+	if (thermal_hbm_disabled != panel->thermal_hbm_disabled) {
+		panel->thermal_hbm_disabled = thermal_hbm_disabled;
+	} else {
+		pr_info("thermal_hbm_disabled(%d) already set, skip!\n",thermal_hbm_disabled);
+		mutex_unlock(&panel->panel_lock);
+		return 0;
+	}
+	mutex_unlock(&panel->panel_lock);
+	pr_info("thermal_hbm_disabled = %d, hbm_enabled = %d\n",thermal_hbm_disabled, panel->hbm_enabled);
+	if (thermal_hbm_disabled) {
+		if (panel->hbm_enabled && panel->panel_initialized) {
+			ret = panel_disp_param_send_lock(panel, DISPPARAM_HBM_OFF | DISPPARAM_THERMAL_SET);
+			if (panel->hbm_brightness)
+				ret = dsi_panel_update_backlight(panel, 2047);
+		}
+	} else {
+		if (panel->hbm_enabled && panel->panel_initialized) {
+			ret = panel_disp_param_send_lock(panel, DISPPARAM_HBM_ON | DISPPARAM_THERMAL_SET);
+			if (panel->hbm_brightness)
+				ret = dsi_panel_update_backlight(panel, panel->last_bl_lvl);
+		}
+	}
+
+	return ret;
+}
+
+int dsi_panel_get_thermal_hbm_disabled(struct dsi_panel *panel,
+			bool *thermal_hbm_disabled)
+{
+	ssize_t count = 0;
+
+	if (!panel) {
+		pr_err("invalid params\n");
+		return -EAGAIN;
+	}
+
+	mutex_lock(&panel->panel_lock);
+
+	*thermal_hbm_disabled = panel->thermal_hbm_disabled;
+
+	mutex_unlock(&panel->panel_lock);
+
+	return count;
 }
 
 int dsi_panel_pre_mode_switch_to_video(struct dsi_panel *panel)
