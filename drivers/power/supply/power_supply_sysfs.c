@@ -47,6 +47,9 @@ static const char * const power_supply_type_text[] = {
 	"USB_HVDCP", "USB_HVDCP_3", "USB_HVDCP_3P5", "Wireless", "USB_FLOAT",
 	"BMS", "Parallel", "Main", "Wipower", "USB_C_UFP", "USB_C_DFP",
 	"Charge_Pump","ZIMI_CAR_POWER","Batt_Verify"
+#ifdef CONFIG_BATT_VERIFY_BY_DS28E16
+	"Batt_Verify",
+#endif
 };
 
 static const char * const power_supply_status_text[] = {
@@ -488,6 +491,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(parallel_fcc_max),
 	POWER_SUPPLY_ATTR(wireless_version),
 	POWER_SUPPLY_ATTR(wireless_fw_version),
+	POWER_SUPPLY_ATTR(parallel_output_mode),
 	POWER_SUPPLY_ATTR(signal_strength),
 	POWER_SUPPLY_ATTR(wireless_cp_en),
 	POWER_SUPPLY_ATTR(wireless_power_good_en),
@@ -597,6 +601,25 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(ti_bypass_mode_enable),
 	POWER_SUPPLY_ATTR(irq_status),
 	POWER_SUPPLY_ATTR(parallel_output_mode),
+	POWER_SUPPLY_ATTR(ffc_chg_term_current),
+#ifdef CONFIG_BATT_VERIFY_BY_DS28E16
+	/* battery verify properties */
+	POWER_SUPPLY_ATTR(romid),
+	POWER_SUPPLY_ATTR(ds_status),
+	POWER_SUPPLY_ATTR(pagenumber),
+	POWER_SUPPLY_ATTR(pagedata),
+	POWER_SUPPLY_ATTR(authen_result),
+	POWER_SUPPLY_ATTR(session_seed),
+	POWER_SUPPLY_ATTR(s_secret),
+	POWER_SUPPLY_ATTR(challenge),
+	POWER_SUPPLY_ATTR(auth_anon),
+	POWER_SUPPLY_ATTR(auth_bdconst),
+	POWER_SUPPLY_ATTR(page0_data),
+	POWER_SUPPLY_ATTR(page1_data),
+	POWER_SUPPLY_ATTR(verify_model_name),
+	POWER_SUPPLY_ATTR(chip_ok),
+#endif
+	POWER_SUPPLY_ATTR(irq_status),
 	/* DIV 2 properties */
 	POWER_SUPPLY_ATTR(div_2_mode),
 	POWER_SUPPLY_ATTR(reverse_chg_mode),
@@ -613,7 +636,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(reverse_iout),
 	POWER_SUPPLY_ATTR(rx_op_ble),
 	POWER_SUPPLY_ATTR(op_ble),
-	
+	POWER_SUPPLY_ATTR(reset_div_2_mode),
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_ATTR(charge_counter_ext),
 	/* Properties of type `const char *' */
