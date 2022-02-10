@@ -9,18 +9,32 @@ enum {
 };
 
 #define KMALLOC_POOL_ORDER2 2
-static inline bool rtmm_pool(const char *name)
-{
-	return false;
-}
 
-static inline bool rtmm_reclaim(const char *name)
+#define GLOBAL_RECLAIM_SWAPPINESS 150
+
+int __init rtmm_pool_init(struct dentry *dir);
+struct page *rtmm_alloc_pages(int pool_type);
+void rtmm_free_pages(void *addr, int pool_type);
+
+int __init rtmm_reclaim_init(struct dentry *dir);
+
+struct scan_control;
+#ifdef CONFIG_RTMM
+static inline bool rtmm_reclaim(struct scan_control *sc)
+{
+	return strncmp("rtmm_reclaim", current->comm,
+		       strlen("rtmm_reclaim")) == 0;
+}
+#else
+static inline bool rtmm_reclaim(struct scan_control *sc)
 {
 	return false;
 }
+#endif
 
 static inline int rtmm_reclaim_swappiness(void)
 {
 	return 60;
 }
+
 #endif
