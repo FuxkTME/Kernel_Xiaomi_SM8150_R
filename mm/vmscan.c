@@ -2289,7 +2289,7 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 		goto out;
 	}
 
-	if (unlikely(rtmm_reclaim(current->comm))) {
+	if (unlikely(rtmm_reclaim(sc))) {
 		swappiness = rtmm_reclaim_swappiness();
 	}
 

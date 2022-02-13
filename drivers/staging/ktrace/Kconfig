@@ -1,0 +1,3 @@
+config KTRACE
+        bool "kernel trace"
+        select DEBUG_FS
