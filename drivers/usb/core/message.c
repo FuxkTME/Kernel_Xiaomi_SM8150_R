@@ -19,7 +19,6 @@
 #include <linux/usb/quirks.h>
 #include <linux/usb/hcd.h>	/* for usbcore internals */
 #include <asm/byteorder.h>
-#include <soc/qcom/boot_stats.h>
 
 #include "usb.h"
 
@@ -1747,7 +1746,6 @@ int usb_set_configuration(struct usb_device *dev, int configuration)
 	struct usb_host_config *cp = NULL;
 	struct usb_interface **new_interfaces = NULL;
 	struct usb_hcd *hcd = bus_to_hcd(dev->bus);
-	char buf[50];
 	int n, nintf;
 
 	if (dev->authorized == 0 || configuration == -1)
@@ -1923,15 +1921,6 @@ free_interfaces:
 		return ret;
 	}
 	usb_set_device_state(dev, USB_STATE_CONFIGURED);
-
-	/* Skip this marker for root-hubs */
-	if (dev->parent != NULL) {
-		scnprintf(buf, sizeof(buf),
-				"New USB device found, VID=%04x, PID=%04x ",
-				le16_to_cpu(dev->descriptor.idVendor),
-				le16_to_cpu(dev->descriptor.idProduct));
-		update_marker(buf);
-	}
 
 	if (cp->string == NULL &&
 			!(dev->quirks & USB_QUIRK_CONFIG_INTF_STRINGS))

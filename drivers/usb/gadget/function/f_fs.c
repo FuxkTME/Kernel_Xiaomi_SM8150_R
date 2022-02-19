@@ -269,8 +269,7 @@ static void ffs_closed(struct ffs_data *ffs);
 
 static int ffs_mutex_lock(struct mutex *mutex, unsigned nonblock)
 	__attribute__((warn_unused_result, nonnull));
-static char *ffs_prepare_buffer(const char __user *buf, size_t len,
-	size_t extra_buf_alloc)
+static char *ffs_prepare_buffer(const char __user *buf, size_t len)
 	__attribute__((warn_unused_result, nonnull));
 
 
@@ -346,7 +345,6 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 			     size_t len, loff_t *ptr)
 {
 	struct ffs_data *ffs = file->private_data;
-	struct usb_gadget *gadget = ffs->gadget;
 	ssize_t ret;
 	char *data;
 
@@ -374,7 +372,7 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 			break;
 		}
 
-		data = ffs_prepare_buffer(buf, len, 0);
+		data = ffs_prepare_buffer(buf, len);
 		if (IS_ERR(data)) {
 			ret = PTR_ERR(data);
 			break;
@@ -446,7 +444,7 @@ static ssize_t ffs_ep0_write(struct file *file, const char __user *buf,
 
 		spin_unlock_irq(&ffs->ev.waitq.lock);
 
-		data = ffs_prepare_buffer(buf, len, gadget->extra_buf_alloc);
+		data = ffs_prepare_buffer(buf, len);
 		if (IS_ERR(data)) {
 			ret = PTR_ERR(data);
 			break;
@@ -653,7 +651,7 @@ static int ffs_ep0_open(struct inode *inode, struct file *file)
 	file->private_data = ffs;
 	ffs_data_opened(ffs);
 
-	return stream_open(inode, file);
+	return 0;
 }
 
 static int ffs_ep0_release(struct inode *inode, struct file *file)
@@ -947,7 +945,6 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 	char *data = NULL;
 	ssize_t ret, data_len = -EINVAL;
 	int halt;
-	size_t extra_buf_alloc = 0;
 
 	ffs_log("enter: %s", epfile->name);
 
@@ -1026,12 +1023,7 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 			data_len = usb_ep_align_maybe(gadget, ep->ep, data_len);
 		spin_unlock_irq(&epfile->ffs->eps_lock);
 
-		extra_buf_alloc = gadget->extra_buf_alloc;
-		if (!io_data->read)
-			data = kmalloc(data_len + extra_buf_alloc,
-					GFP_KERNEL);
-		else
-			data = kmalloc(data_len, GFP_KERNEL);
+		data = kmalloc(data_len, GFP_KERNEL);
 		if (unlikely(!data)) {
 			ret = -ENOMEM;
 			goto error_mutex;
@@ -1192,7 +1184,7 @@ ffs_epfile_open(struct inode *inode, struct file *file)
 	ffs_data_opened(epfile->ffs);
 	atomic_inc(&epfile->opened);
 
-	return stream_open(inode, file);
+	return 0;
 }
 
 static int ffs_aio_cancel(struct kiocb *kiocb)
@@ -1206,7 +1198,7 @@ static int ffs_aio_cancel(struct kiocb *kiocb)
 	ENTER();
 
 	ffs_log("enter:state %d setup_state %d flag %lu", ffs->state,
-		ffs->setup_state, ffs->flags);
+	ffs->setup_state, ffs->flags);
 
 	spin_lock_irqsave(&epfile->ffs->eps_lock, flags);
 
@@ -1404,8 +1396,8 @@ static long ffs_epfile_ioctl(struct file *file, unsigned code,
 		struct usb_endpoint_descriptor desc1, *desc;
 
 		switch (epfile->ffs->gadget->speed) {
-		case USB_SPEED_SUPER:
 		case USB_SPEED_SUPER_PLUS:
+		case USB_SPEED_SUPER:
 			desc_idx = 2;
 			break;
 		case USB_SPEED_HIGH:
@@ -3194,6 +3186,7 @@ static inline struct f_fs_opts *ffs_do_functionfs_bind(struct usb_function *f,
 	struct f_fs_opts *ffs_opts =
 		container_of(f->fi, struct f_fs_opts, func_inst);
 	struct ffs_data *ffs;
+
 	int ret;
 
 	ENTER();
@@ -3946,7 +3939,6 @@ static int ffs_acquire_dev(const char *dev_name, struct ffs_data *ffs_data)
 	}
 
 	ffs_dev_unlock();
-
 	return ret;
 }
 
@@ -4063,23 +4055,14 @@ static int ffs_mutex_lock(struct mutex *mutex, unsigned nonblock)
 		: mutex_lock_interruptible(mutex);
 }
 
-/**
- * ffs_prepare_buffer() - copy userspace buffer into kernel.
- * @buf: userspace buffer
- * @len: length of the buffer
- * @extra_alloc_buf: Extra buffer allocation if required by UDC.
- *
- * This function returns pointer to the copied buffer
- */
-static char *ffs_prepare_buffer(const char __user *buf, size_t len,
-		size_t extra_buf_alloc)
+static char *ffs_prepare_buffer(const char __user *buf, size_t len)
 {
 	char *data;
 
 	if (unlikely(!len))
 		return NULL;
 
-	data = kmalloc(len + extra_buf_alloc, GFP_KERNEL);
+	data = kmalloc(len, GFP_KERNEL);
 	if (unlikely(!data))
 		return ERR_PTR(-ENOMEM);
 

@@ -1,5 +1,4 @@
 /* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
- * Copyright (C) 2019 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -970,7 +969,7 @@ const char *fg_get_battery_type(struct fg_dev *fg)
 
 int fg_get_battery_resistance(struct fg_dev *fg, int *val)
 {
-	int rc, esr_uohms = 0, rslow_uohms = 0;
+	int rc, esr_uohms, rslow_uohms;
 
 	rc = fg_get_sram_prop(fg, FG_SRAM_ESR, &esr_uohms);
 	if (rc < 0) {

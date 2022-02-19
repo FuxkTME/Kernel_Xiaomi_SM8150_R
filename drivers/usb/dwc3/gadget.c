@@ -36,6 +36,11 @@
 #include "gadget.h"
 #include "io.h"
 
+#undef dev_dbg
+#define dev_dbg dev_info
+#undef pr_debug
+#define pr_debug pr_info
+
 static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc, bool remote_wakeup);
 static int dwc3_gadget_wakeup_int(struct dwc3 *dwc);
 static int __dwc3_gadget_start(struct dwc3 *dwc);
@@ -878,7 +883,7 @@ static void dwc3_remove_requests(struct dwc3 *dwc, struct dwc3_ep *dep)
 	if (ret)
 		return;
 
-	if (dep->number == 0 && dwc->ep0state != EP0_SETUP_PHASE) {
+	if (dep->number == 1 && dwc->ep0state != EP0_SETUP_PHASE) {
 		unsigned int dir;
 
 		dbg_log_string("CTRLPEND(%d)", dwc->ep0state);
@@ -1986,9 +1991,10 @@ static int dwc3_gadget_wakeup_int(struct dwc3 *dwc)
 	case DWC3_LINK_STATE_RESET:
 	case DWC3_LINK_STATE_RX_DET:	/* in HS, means Early Suspend */
 	case DWC3_LINK_STATE_U3:	/* in HS, means SUSPEND */
+	case DWC3_LINK_STATE_U2:	/* in HS, means Sleep (L1) */
+	case DWC3_LINK_STATE_U1:
 	case DWC3_LINK_STATE_RESUME:
 		break;
-	case DWC3_LINK_STATE_U1:
 		if (dwc->gadget.speed < USB_SPEED_SUPER) {
 			link_recover_only = true;
 			break;
@@ -2158,12 +2164,6 @@ done:
 	/* phy sync delay as per data book */
 	msleep(50);
 
-	/*
-	 * Soft reset clears the block on the doorbell,
-	 * set it back to prevent unwanted writes to the doorbell.
-	 */
-	dwc3_notify_event(dwc, DWC3_CONTROLLER_NOTIFY_CLEAR_DB, 0);
-
 	return 0;
 }
 
@@ -2332,9 +2332,6 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	/* prevent pending bh to run later */
 	flush_work(&dwc->bh_work);
 
-	if (is_on)
-		dwc3_device_core_soft_reset(dwc);
-
 	spin_lock_irqsave(&dwc->lock, flags);
 	if (dwc->ep0state != EP0_SETUP_PHASE)
 		dbg_event(0xFF, "EP0 is not in SETUP phase\n", 0);
@@ -2359,8 +2356,6 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 		dwc->err_evt_seen = true;
 		dwc3_notify_event(dwc, DWC3_CONTROLLER_ERROR_EVENT, 0);
 		dwc3_notify_event(dwc, DWC3_CONTROLLER_NOTIFY_CLEAR_DB, 0);
-		/* Return zero as error recovery is triggered for timeout */
-		ret = 0;
 	}
 	enable_irq(dwc->irq);
 
@@ -2882,8 +2877,7 @@ static int __dwc3_cleanup_done_trbs(struct dwc3 *dwc, struct dwc3_ep *dep,
 	 */
 	if ((req->zero || req->unaligned) && !(trb->ctrl & DWC3_TRB_CTRL_CHN)) {
 		trb->ctrl &= ~DWC3_TRB_CTRL_HWO;
-		return (((event->status & DEPEVT_STATUS_IOC) &&
-				(trb->ctrl & DWC3_TRB_CTRL_IOC)) ? 1 : 0);
+		return 1;
 	}
 
 	count = trb->size & DWC3_TRB_SIZE_MASK;

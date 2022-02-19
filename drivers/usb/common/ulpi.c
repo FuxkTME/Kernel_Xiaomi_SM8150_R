@@ -42,11 +42,8 @@ static int ulpi_match(struct device *dev, struct device_driver *driver)
 	struct ulpi *ulpi = to_ulpi_dev(dev);
 	const struct ulpi_device_id *id;
 
-	/*
-	 * Some ULPI devices don't have a vendor id
-	 * or provide an id_table so rely on OF match.
-	 */
-	if (ulpi->id.vendor == 0 || !drv->id_table)
+	/* Some ULPI devices don't have a vendor id so rely on OF match */
+	if (ulpi->id.vendor == 0)
 		return of_driver_match_device(dev, driver);
 
 	for (id = drv->id_table; id->vendor; id++)
