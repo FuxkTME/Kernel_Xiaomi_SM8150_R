@@ -1948,10 +1948,6 @@ static const struct mm_walk_ops reclaim_walk_ops = {
 	.pmd_entry = reclaim_pte_range,
 };
 
-static const struct mm_walk_ops reclaim_walk_ops = {
-	.pmd_entry = reclaim_pte_range,
-};
-
 struct reclaim_param reclaim_task_anon(struct task_struct *task,
 		int nr_to_reclaim)
 {
