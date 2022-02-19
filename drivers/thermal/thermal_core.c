@@ -29,7 +29,6 @@
 
 #ifdef CONFIG_DRM
 #include <linux/msm_drm_notify.h>
-#include <linux/notifier.h>
 #endif
 
 #define CREATE_TRACE_POINTS
@@ -1839,6 +1838,37 @@ static void destroy_thermal_message_node(void)
 	device_unregister(&thermal_message_dev);
 }
 
+#ifdef CONFIG_DRM
+static int screen_state_for_thermal_callback(struct notifier_block *nb, unsigned long val, void *data)
+{
+	struct msm_drm_notifier *evdata = data;
+	unsigned int blank;
+
+	if (val != MSM_DRM_EVENT_BLANK || !evdata || !evdata->data)
+		return 0;
+
+	blank = *(int *)(evdata->data);
+	switch (blank) {
+	case MSM_DRM_BLANK_LP:
+		pr_warn("%s: MSM_DRM_BLANK_LP\n", __func__);
+	case MSM_DRM_BLANK_POWERDOWN:
+		sm.screen_state = 0;
+		pr_warn("%s: MSM_DRM_BLANK_POWERDOWN\n", __func__);
+		break;
+	case MSM_DRM_BLANK_UNBLANK:
+		sm.screen_state = 1;
+		pr_warn("%s: MSM_DRM_BLANK_UNBLANK\n", __func__);
+		break;
+	default:
+		break;
+	}
+
+	sysfs_notify(&thermal_message_dev.kobj, NULL, "screen_state");
+
+	return NOTIFY_OK;
+}
+#endif
+
 static int of_parse_thermal_message(void)
 {
 	struct device_node *np;
@@ -1894,6 +1924,13 @@ static int __init thermal_init(void)
 	if (result)
 		pr_warn("Thermal: Can not parse thermal message node, return %d\n",
 			result);
+
+#ifdef CONFIG_DRM
+	sm.thermal_notifier.notifier_call = screen_state_for_thermal_callback;
+	if (msm_drm_register_client(&sm.thermal_notifier) < 0) {
+		pr_warn("Thermal: register screen state callback failed\n");
+	}
+#endif
 
 	return 0;
 
