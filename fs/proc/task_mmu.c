@@ -1867,7 +1867,7 @@ int reclaim_address_space(struct address_space *mapping,
 	return ret;
 }
 
-int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
+static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
 				unsigned long end, struct mm_walk *walk)
 {
 	struct reclaim_param *rp = walk->private;
@@ -1944,6 +1944,29 @@ enum reclaim_type {
 	RECLAIM_RANGE,
 };
 
+struct reclaim_param reclaim_task_nomap(struct task_struct *task,
+		int nr_to_reclaim)
+{
+	struct mm_struct *mm;
+	struct reclaim_param rp = {
+		.nr_to_reclaim = nr_to_reclaim,
+	};
+
+	get_task_struct(task);
+	mm = get_task_mm(task);
+	if (!mm)
+		goto out;
+	down_read(&mm->mmap_sem);
+
+	proc_reclaim_notify((unsigned long)task_pid(task), (void *)&rp);
+
+	up_read(&mm->mmap_sem);
+	mmput(mm);
+out:
+	put_task_struct(task);
+	return rp;
+}
+
 static const struct mm_walk_ops reclaim_walk_ops = {
 	.pmd_entry = reclaim_pte_range,
 };
@@ -1999,7 +2022,6 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 	unsigned long end = 0;
 	struct reclaim_param rp;
 	int ret;
-	struct mm_walk reclaim_walk = {};
 
 	memset(buffer, 0, sizeof(buffer));
 	if (count > sizeof(buffer) - 1)
@@ -2075,7 +2097,6 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 			ret = walk_page_range(mm, max(vma->vm_start, start),
 					min(vma->vm_end, end),
 					&reclaim_walk_ops, &rp);
-
 			if (ret)
 				break;
 			vma = vma->vm_next;
@@ -2094,7 +2115,6 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 			rp.vma = vma;
 			ret = walk_page_range(mm, vma->vm_start, vma->vm_end,
 				&reclaim_walk_ops, &rp);
-
 			if (ret)
 				break;
 		}
