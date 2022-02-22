@@ -120,9 +120,9 @@ config F2FS_FS_LZO
 config F2FS_FS_LZORLE
 	bool "LZO-RLE compression support"
 	depends on F2FS_FS_LZO
-	default y
+	default n
 	help
-	  Support LZO-RLE compress algorithm, if unsure, say Y.
+	  Support LZO-RLE compress algorithm, if unsure, say N.
 
 config F2FS_FS_LZ4
 	bool "LZ4 compression support"

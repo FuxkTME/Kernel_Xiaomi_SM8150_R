@@ -1133,8 +1133,6 @@ static ssize_t mm_stat_show(struct device *dev,
 			max_used << PAGE_SHIFT,
 			(u64)atomic64_read(&zram->stats.same_pages),
 			pool_stats.pages_compacted,
-			zram_dedup_dup_size(zram),
-			zram_dedup_meta_size(zram),
 			(u64)atomic64_read(&zram->stats.huge_pages),
 			(u64)atomic64_read(&zram->stats.huge_pages_since));
 	up_read(&zram->init_lock);
@@ -1278,10 +1276,8 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 	int ret;
 	unsigned long handle;
     struct zcomp_strm *zstrm;
-	struct zram_entry *entry;
 	unsigned int size;
 	void *src, *dst;
-	int ret;
 
 	zram_slot_lock(zram, index);
 	if (zram_test_flag(zram, index, ZRAM_WB)) {
@@ -1315,8 +1311,7 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 	if (size != PAGE_SIZE)
 		zstrm = zcomp_stream_get(zram->comp);
 
-	src = zs_map_object(zram->mem_pool,
-			    zram_entry_handle(zram, entry), ZS_MM_RO);
+        src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
 	if (size == PAGE_SIZE) {
 		dst = kmap_atomic(page);
 		memcpy(dst, src, PAGE_SIZE);

@@ -132,7 +132,6 @@ struct zram {
 #endif
 };
 
-void zram_entry_free(struct zram *zram, struct zram_entry *entry);
 #ifdef CONFIG_HSWAP
 extern int zram0_free_size(void);
 #endif
