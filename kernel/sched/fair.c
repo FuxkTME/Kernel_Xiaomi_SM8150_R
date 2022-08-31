@@ -45,7 +45,9 @@ extern unsigned int ht_fuse_boost;
 #endif
 
 #ifdef CONFIG_SMP
+#ifndef CONFIG_SCHED_WALT
 static inline bool get_rtg_status(struct task_struct *p);
+#endif
 static inline bool task_fits_max(struct task_struct *p, int cpu);
 #endif /* CONFIG_SMP */
 
@@ -7526,6 +7528,7 @@ static int get_start_cpu(struct task_struct *p)
 {
 	struct root_domain *rd = cpu_rq(smp_processor_id())->rd;
 	int start_cpu = rd->min_cap_orig_cpu;
+	int task_boost = per_task_boost(p);
 	bool boosted = schedtune_task_boost(p) > 0 ||
 			task_boost_policy(p) == SCHED_BOOST_ON_BIG;
 #ifdef CONFIG_SCHED_WALT
@@ -7546,6 +7549,12 @@ static int get_start_cpu(struct task_struct *p)
 		start_cpu = rd->mid_cap_orig_cpu == -1 ?
 			rd->max_cap_orig_cpu : rd->mid_cap_orig_cpu;
 	}
+
+	if (task_boost > TASK_BOOST_ON_MID) {
+		start_cpu = rd->max_cap_orig_cpu;
+		return start_cpu;
+	}
+
 	if (start_cpu == -1 || start_cpu == rd->max_cap_orig_cpu)
 		return start_cpu;
 
@@ -8183,7 +8192,7 @@ static inline int wake_to_idle(struct task_struct *p)
 }
 
 #ifdef CONFIG_SCHED_WALT
-static inline bool get_rtg_status(struct task_struct *p)
+inline bool get_rtg_status(struct task_struct *p)
 {
 	struct related_thread_group *grp;
 	bool ret = false;
@@ -8215,6 +8224,64 @@ static inline bool is_many_wakeup(int sibling_count_hint)
 	return false;
 }
 #endif
+
+#define MIN_UTIL_FOR_ENERGY_EVAL	52
+void walt_get_indicies(struct task_struct *p, int *order_index,
+		int *end_index, int per_task_boost, bool is_boosted,
+		bool *energy_eval_needed)
+{
+	int i = 0;
+	*order_index = 0;
+	*end_index = 0;
+
+	if (num_sched_clusters <= 1)
+		return;
+
+	if (per_task_boost > TASK_BOOST_ON_MID) {
+		*order_index = num_sched_clusters - 1;
+		*energy_eval_needed = false;
+		return;
+	}
+
+	if (is_full_throttle_boost()) {
+		*energy_eval_needed = false;
+		*order_index = num_sched_clusters - 1;
+		if ((*order_index > 1) && task_demand_fits(p,
+			cpumask_first(&cpu_array[*order_index][1])))
+			*end_index = 1;
+		return;
+	}
+
+	if (is_boosted || per_task_boost ||
+		task_boost_policy(p) == SCHED_BOOST_ON_BIG ||
+		walt_task_skip_min_cpu(p)) {
+		*energy_eval_needed = false;
+		*order_index = 1;
+		if (sysctl_sched_asymcap_boost) {
+			*end_index = 1;
+			return;
+		}
+	}
+
+	for (i = *order_index ; i < num_sched_clusters - 1; i++) {
+		if (task_demand_fits(p, cpumask_first(&cpu_array[i][0])))
+			break;
+	}
+
+	*order_index = i;
+
+	if (*order_index == 0 &&
+			(task_util(p) >= MIN_UTIL_FOR_ENERGY_EVAL) &&
+			!(p->in_iowait && task_in_related_thread_group(p)) &&
+			!get_rtg_status(p) &&
+			!(sched_boost_type == CONSERVATIVE_BOOST && task_sched_boost(p)) &&
+			!sysctl_sched_suppress_region2
+		)
+		*end_index = 1;
+
+	if (p->in_iowait && task_in_related_thread_group(p))
+		*energy_eval_needed = false;
+}
 
 /*
  * Needs to be called inside rcu_read_lock critical section.

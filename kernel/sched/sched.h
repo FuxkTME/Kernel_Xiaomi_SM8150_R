@@ -32,6 +32,7 @@
 #include <linux/irq_work.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
+#include <linux/energy_model.h>
 
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
@@ -41,6 +42,7 @@
 #include "cpudeadline.h"
 #include "cpuacct.h"
 #include "android.h"
+#include "walt_ext.h"
 
 #ifdef CONFIG_SCHED_DEBUG
 # define SCHED_WARN_ON(x)	WARN_ONCE(x, #x)
@@ -107,6 +109,7 @@ struct sched_cluster {
 	unsigned int max_possible_freq;
 	bool freq_init_done;
 	u64 aggr_grp_load;
+      	u16 util_to_cost[1024];
 };
 
 extern cpumask_t asym_cap_sibling_cpus;
@@ -763,6 +766,12 @@ struct root_domain {
 
 	/* Maximum cpu capacity in the system. */
 	struct max_cpu_capacity max_cpu_capacity;
+
+	/*
+	 * NULL-terminated list of performance domains intersecting with the
+	 * CPUs of the rd. Protected by RCU.
+	 */
+	struct perf_domain	*pd;
 
 	/* First cpu with maximum and minimum original capacity */
 	int max_cap_orig_cpu, min_cap_orig_cpu;
@@ -2898,6 +2907,11 @@ static inline int sched_boost(void)
 	return sched_boost_type;
 }
 
+static inline bool is_full_throttle_boost(void)
+{
+	return sched_boost() == FULL_THROTTLE_BOOST;
+}
+
 extern int preferred_cluster(struct sched_cluster *cluster,
 						struct task_struct *p);
 extern struct sched_cluster *rq_cluster(struct rq *rq);
@@ -3164,3 +3178,12 @@ static inline void sched_irq_work_queue(struct irq_work *work)
 }
 #endif
 
+#ifdef CONFIG_SCHED_WALT
+inline bool get_rtg_status(struct task_struct *p);
+
+static inline bool walt_task_skip_min_cpu(struct task_struct *p)
+{
+	return (sched_boost_type != CONSERVATIVE_BOOST) &&
+		get_rtg_status(p) && (p->unfilter);
+}
+#endif
