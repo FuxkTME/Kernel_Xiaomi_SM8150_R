@@ -2754,23 +2754,8 @@ enum sched_boost_policy {
 };
 
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDUTIL
-/**
- * enum schedutil_type - CPU utilization type
- * @FREQUENCY_UTIL:	Utilization used to select frequency
- * @ENERGY_UTIL:	Utilization used during energy calculation
- *
- * The utilization signals of all scheduling classes (CFS/RT/DL) and IRQ time
- * need to be aggregated differently depending on the usage made of them. This
- * enum is used within schedutil_freq_util() to differentiate the types of
- * utilization expected by the callers, and adjust the aggregation accordingly.
- */
-enum schedutil_type {
-	FREQUENCY_UTIL,
-	ENERGY_UTIL,
-};
-
 unsigned long schedutil_freq_util(int cpu, unsigned long util_cfs,
-				  unsigned long max, enum schedutil_type type);
+				  unsigned long max, enum cpu_util_type type);
 
 static inline unsigned long schedutil_energy_util(int cpu, unsigned long cfs)
 {
@@ -2788,8 +2773,6 @@ static inline unsigned long schedutil_energy_util(int cpu, unsigned long cfs)
 #ifdef CONFIG_SCHED_WALT
 
 static inline int cluster_first_cpu(struct sched_cluster *cluster)
-
-static inline unsigned long cpu_bw_dl(struct rq *rq)
 {
 	return cpumask_first(&cluster->cpus);
 }

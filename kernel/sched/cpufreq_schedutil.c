@@ -321,7 +321,7 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
  * required to meet deadlines.
  */
 unsigned long schedutil_freq_util(int cpu, unsigned long util_cfs,
-				  unsigned long max, enum schedutil_type type)
+				  unsigned long max, enum cpu_util_type type)
 {
 	unsigned long dl_util, util, irq;
 	struct rq *rq = cpu_rq(cpu);
@@ -405,7 +405,7 @@ static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 
 	*util = min(util_ext, cpu_util_freq_walt(cpu, &loadcpu->walt_load));
 	
-	*util = schedutil_freq_util(sg_cpu->cpu, *util, max, FREQUENCY_UTIL);
+	*util = schedutil_freq_util(cpu, *util, *max, FREQUENCY_UTIL);
 }
 
 static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
