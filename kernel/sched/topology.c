@@ -4,6 +4,8 @@
  */
 #include <linux/sched.h>
 #include <linux/mutex.h>
+#include <linux/cpufreq.h>
+#include <linux/sched/cpufreq.h>
 
 #include "sched.h"
 

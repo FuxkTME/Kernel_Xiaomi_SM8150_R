@@ -20,6 +20,7 @@
 #include "sched.h"
 
 #include <linux/sched/cpufreq.h>
+#include <linux/cpuset.h>
 #include <trace/events/power.h>
 
 #define SUGOV_KTHREAD_PRIORITY	50
@@ -405,7 +406,7 @@ static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 
 	*util = min(util_ext, cpu_util_freq_walt(cpu, &loadcpu->walt_load));
 	
-	*util = schedutil_freq_util(cpu, *util, *max, FREQUENCY_UTIL);
+	*util = uclamp_rq_util_with(rq, *util, NULL);
 }
 
 static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
